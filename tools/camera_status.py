@@ -28,6 +28,12 @@ import subprocess
 import sys
 import urllib.request
 
+# macOS + Homebrew: /opt/homebrew/bin is missing from minimal PATHs (launchd/cron/SSH)
+if sys.platform == "darwin" and os.path.isdir("/opt/homebrew/bin"):
+    os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ.get("PATH", "")
+
+from urllib.parse import quote
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAP_DIR = ROOT / "snapshots"
 SNAP_DIR.mkdir(exist_ok=True)
@@ -50,7 +56,8 @@ def rtsp_url(cam):
     user = os.environ.get("RTSP_USER", "")
     pw = os.environ.get("RTSP_PASS", "")
     if user and url.startswith("rtsp://") and "@" not in url:
-        url = url.replace("rtsp://", f"rtsp://{user}:{pw}@", 1)
+        # percent-encode so special chars in passwords (#, !, @, ...) survive
+        url = url.replace("rtsp://", f"rtsp://{quote(user, safe='')}:{quote(pw, safe='')}@", 1)
     return url
 
 
