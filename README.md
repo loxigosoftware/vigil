@@ -100,7 +100,23 @@ Two files are created by the installer — fill them in:
 ```
 `name` is the label shown in reports (any language), `url` is the RTSP stream address. Credentials are added automatically from `secrets.env`.
 
-Model: `AMELE_MODEL=qwen3-vl` (default) in `secrets.env`. Check `ollama list`; on a powerful machine you can pick a bigger model (e.g. `qwen3-vl:30b`).
+### Providers — local or online (single switch)
+
+Everything — the agent loop *and* the image analysis — follows one switch in `secrets.env`. Local (Ollama) is the default; online is optional.
+
+| Setup | `PROVIDER_TYPE` | `BASE_URL` | `API_KEY` | `AMELE_MODEL` |
+|---|---|---|---|---|
+| **Local (default)** | `openai` | `http://localhost:11434/v1` | *(empty)* | `qwen3-vl` |
+| **OpenAI** | `openai` | `https://api.openai.com/v1` | `sk-...` | `gpt-4.1-mini` |
+| **OpenRouter** | `openai` | `https://openrouter.ai/api/v1` | `sk-or-...` | `openai/gpt-4o-mini` |
+| **Anthropic** | `anthropic` | `https://api.anthropic.com` | `sk-ant-...` | `claude-3-5-sonnet` |
+
+- **Local** = Ollama on the same machine, works fully offline. **Online** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API.
+- Image analysis follows the same switch: a local `BASE_URL` (localhost) uses Ollama's native API; an online one uses the provider's vision format. `VISION_MODEL` overrides the image-analysis model (defaults to `AMELE_MODEL`); `VISION_MODE` forces a specific mode if you ever need to.
+- With `anthropic`, `BASE_URL` must **not** end in `/v1`. With OpenAI-compatible endpoints it normally does.
+- Gemini is not natively supported by amele — use it through OpenRouter (`google/gemini-2.0-flash` style model names).
+- API keys live only in `secrets.env` (never in git) and are referenced from `agent.yaml` as `${API_KEY}` — amele rejects literal keys in YAML.
+- Check `ollama list` for locally available models; on a powerful machine you can pick a bigger one (e.g. `qwen3-vl:30b`).
 
 **Report language:** follows the `system_prompt` in `agent.yaml` — the default is English; change it if you prefer your own language.
 

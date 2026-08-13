@@ -52,6 +52,9 @@ fi
 
 echo "==> 5/6 Agent validation"
 export AMELE_MODEL="${AMELE_MODEL:-qwen3-vl}"
+export PROVIDER_TYPE="${PROVIDER_TYPE:-openai}"
+export BASE_URL="${BASE_URL:-http://localhost:11434/v1}"
+export API_KEY="${API_KEY:-}"
 "$ROOT/bin/amele" validate "$ROOT/agent.yaml" || {
   echo "    agent.yaml failed validation — see the error above."
   exit 1

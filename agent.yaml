@@ -1,12 +1,21 @@
 # vigil: home camera patrol agent (built on amele).
 # Run:     bin/amele run agent.yaml "Patrol all cameras and send the report"
-# Env:     AMELE_MODEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RTSP_USER, RTSP_PASS, OLLAMA_HOST
+# Env:     PROVIDER_TYPE, BASE_URL, API_KEY, AMELE_MODEL,
+#          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RTSP_USER, RTSP_PASS
 
 model: ${AMELE_MODEL}
 
 provider:
-  base_url: http://localhost:11434/v1   # Ollama's OpenAI-compatible endpoint
-  api_key: ""                           # local model — no key needed
+  # Wire protocol — the single switch shared with camera_status.py:
+  #   openai (default) — any OpenAI-compatible endpoint:
+  #       local Ollama  -> BASE_URL=http://localhost:11434/v1, API_KEY empty
+  #       OpenAI        -> BASE_URL=https://api.openai.com/v1
+  #       OpenRouter    -> BASE_URL=https://openrouter.ai/api/v1
+  #   anthropic — native Anthropic Messages API:
+  #       BASE_URL=https://api.anthropic.com (must NOT end with /v1)
+  type: ${PROVIDER_TYPE}
+  base_url: ${BASE_URL}
+  api_key: ${API_KEY}   # env reference only — amele rejects literal keys in YAML
 
 system_prompt: |
   You are a home camera patrol agent. Your job: check every camera one by one

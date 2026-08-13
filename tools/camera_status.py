@@ -5,11 +5,20 @@ stdin: camera name (the 'name' in cameras.json)
 stdout: analysis of that camera's live view (or an error message)
 
 Captures a single frame from the RTSP stream with ffmpeg, sends it to the
-vision model in Ollama, and returns a short description of what is visible.
-The last frame is kept at snapshots/last.jpg (used by the send_telegram_photo
-tool).
+vision model, and returns a short description of what is visible. The last
+frame is kept at snapshots/last.jpg (used by the send_telegram_photo tool).
 
-Env vars: RTSP_USER, RTSP_PASS, OLLAMA_HOST, AMELE_MODEL
+Vision follows the same single provider switch as the agent (secrets.env):
+  PROVIDER_TYPE=openai (default) — OpenAI-compatible endpoint: local Ollama
+                                   (BASE_URL on localhost) or online (OpenAI,
+                                   OpenRouter, vLLM, ...)
+  PROVIDER_TYPE=anthropic        — native Anthropic Messages API
+  VISION_MODE  auto|ollama|openai|anthropic  (auto: localhost → Ollama native)
+  VISION_MODEL (optional) — separate model for image analysis
+                            (defaults to AMELE_MODEL)
+
+Env vars: PROVIDER_TYPE, BASE_URL, API_KEY, AMELE_MODEL, VISION_MODEL,
+          VISION_MODE, RTSP_USER, RTSP_PASS
 """
 import base64
 import json
@@ -22,6 +31,12 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAP_DIR = ROOT / "snapshots"
 SNAP_DIR.mkdir(exist_ok=True)
+
+PROMPT = (
+    "This is a home security camera frame. Describe it briefly in 1-2 "
+    "sentences: is there a person, an animal, motion, an anomaly, or a "
+    "vehicle? If unsure, say 'unclear'."
+)
 
 
 def load_cameras():
@@ -52,28 +67,101 @@ def snapshot(url, out):
     return out.exists()
 
 
-def analyze(path, model, host):
-    """Send the image to Ollama /api/chat and return the description text."""
+def base_url():
+    return os.environ.get("BASE_URL", "").strip() or "http://localhost:11434/v1"
+
+
+def is_local(url):
+    return any(h in url for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
+
+
+def ollama_host():
+    """Ollama's native API root: BASE_URL minus a trailing /v1."""
+    url = base_url()
+    if url.endswith("/v1"):
+        url = url[:-3]
+    return url.rstrip("/")
+
+
+def analyze(path, model):
+    """Send the image to the vision provider; return the description text."""
     b64 = base64.b64encode(path.read_bytes()).decode()
-    prompt = (
-        "This is a home security camera frame. Describe it briefly in 1-2 "
-        "sentences: is there a person, an animal, motion, an anomaly, or a "
-        "vehicle? If unsure, say 'unclear'."
+    mode = os.environ.get("VISION_MODE", "auto").strip().lower()
+    ptype = os.environ.get("PROVIDER_TYPE", "openai").strip().lower()
+    if mode == "auto":
+        mode = "ollama" if (ptype != "anthropic" and is_local(base_url())) else ptype
+    if mode == "ollama":
+        return _ollama(b64, model)
+    if mode == "anthropic":
+        return _anthropic(b64, model)
+    return _openai(b64, model)
+
+
+def _post(url, payload, headers, timeout=90):
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", **headers},
     )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _ollama(b64, model):
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt, "images": [b64]}],
+        "messages": [{"role": "user", "content": PROMPT, "images": [b64]}],
         "stream": False,
         "options": {"temperature": 0.1},
     }
-    req = urllib.request.Request(
-        f"{host}/api/chat",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=90) as r:
-        data = json.loads(r.read())
+    data = _post(f"{ollama_host()}/api/chat", payload, {})
     return data["message"]["content"].strip()
+
+
+def _openai(b64, model):
+    api_key = os.environ.get("API_KEY", "")
+    if not api_key:
+        return "ERROR: API_KEY missing — set it in secrets.env for online vision"
+    payload = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": PROMPT},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ],
+        }],
+        "max_tokens": 1024,
+        "temperature": 0.1,
+    }
+    data = _post(f"{base_url()}/chat/completions", payload,
+                 {"Authorization": f"Bearer {api_key}"})
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _anthropic(b64, model):
+    api_key = os.environ.get("API_KEY", "")
+    if not api_key:
+        return "ERROR: API_KEY missing — set it in secrets.env for Anthropic vision"
+    base = base_url().rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    payload = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": PROMPT},
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/jpeg", "data": b64}},
+            ],
+        }],
+    }
+    data = _post(f"{base}/v1/messages", payload, {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    })
+    return " ".join(b.get("text", "") for b in data.get("content", [])).strip()
 
 
 def main():
@@ -89,8 +177,7 @@ def main():
         print(f"ERROR: '{name}' not found in cameras.json. Known cameras: {names}")
         sys.exit(1)
 
-    model = os.environ.get("AMELE_MODEL", "qwen3-vl")
-    host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    model = os.environ.get("VISION_MODEL", "") or os.environ.get("AMELE_MODEL", "qwen3-vl")
     out = SNAP_DIR / f"{name.replace('/', '_')}.jpg"
 
     if not snapshot(rtsp_url(cam), out):
@@ -98,7 +185,7 @@ def main():
         return  # not an error: the agent should report it
 
     try:
-        text = analyze(out, model, host)
+        text = analyze(out, model)
     except Exception as e:  # noqa: BLE001 — return text so the agent can report it
         print(f"Camera '{name}' frame captured but vision analysis failed: {e}")
         return
