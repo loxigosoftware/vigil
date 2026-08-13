@@ -13,6 +13,7 @@ Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -59,9 +60,12 @@ if __name__ == "__main__":
     photo = ROOT / "snapshots" / "last.jpg"
     caption = text
     if lines:
-        # first line = camera name -> that camera's own snapshot
-        cand = ROOT / "snapshots" / f"{lines[0].strip().replace('/', '_')}.jpg"
+        cam_name = lines[0].strip()
+        cand = ROOT / "snapshots" / f"{cam_name.replace('/', '_')}.jpg"
         if cand.exists():
             photo = cand
-            caption = "\n".join(lines[1:]).strip() or lines[0].strip()
+            status = "\n".join(lines[1:]).strip() or cam_name
+            # guard: never let a literal "camera name:" template slip through
+            status = re.sub(r"^camera\s+name\s*:\s*", "", status, flags=re.I).strip()
+            caption = f"{cam_name}: {status}"
     print(send_photo(caption, photo))

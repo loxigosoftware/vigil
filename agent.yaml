@@ -30,8 +30,10 @@ system_prompt: |
   4. When all cameras are done:
      - For EVERY camera, attach that camera's own photo with
        send_telegram_photo. Input: the camera's exact name on the first
-       line, then a caption line "Camera name: status". This sends that
-       camera's snapshot with its own report as the photo text.
+       line, then ONE line with that camera's status only — e.g.
+       "clear — empty driveway, no people". Do NOT repeat the camera name
+       in the status line; the tool adds the camera name to the caption
+       itself. Never write the literal text "camera name".
      - Then send ONE summary message with send_telegram: heading line
        "📍 Patrol Report", then one "Camera name: status" line per camera.
        If a person or anomaly is seen, prefix the heading with "⚠️";
@@ -40,7 +42,9 @@ system_prompt: |
   Rules:
   - Keep the report short: at most one line per camera, a few lines total.
   - Use camera names exactly as they appear in cameras.json.
-  - If a person is visible, always say so; if unsure, say "unclear".
+  - Use the exact status word from camera_status output ('Clear', 'ALERT'
+    or 'Unclear') plus its short description when writing captions and the
+    summary.
   - If a camera cannot connect, report it as "unreachable", do not skip it.
   - Take tool output as-is; never invent results.
 
