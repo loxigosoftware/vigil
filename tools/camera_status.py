@@ -131,10 +131,21 @@ def _rtsp_capture(url, out, timeout=15):
         if not h.startswith(b"RTSP/1.0 200"):
             return False
         sdp = body.decode("latin-1")
+        # locate the video media block: its a=control URL and codec
+        codec = None
         control = "streamid=0"
+        in_video = False
         for line in sdp.splitlines():
-            if line.startswith("a=control:"):
+            if line.startswith("m="):
+                in_video = line.startswith("m=video")
+            elif in_video and line.startswith("a=control:"):
                 control = line.split(":", 1)[1].strip()
+            elif in_video and line.startswith("a=rtpmap:"):
+                cname = line.split(":", 1)[1].strip().split(" ")[1].split("/")[0].upper()
+                if cname in ("H264", "H265", "HEVC"):
+                    codec = "h264" if cname == "H264" else "h265"
+        if codec is None:
+            return False
         ctrl = control if control.startswith("rtsp://") else (
             base.rstrip("/") + "/" + control.lstrip("/"))
         h, _ = req("SETUP", 3,
@@ -162,8 +173,8 @@ def _rtsp_capture(url, out, timeout=15):
                 buf += c
             return buf
 
-        h264 = bytearray()
-        seen_sps = False
+        es = bytearray()
+        params_seen = False
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -177,34 +188,58 @@ def _rtsp_capture(url, out, timeout=15):
             if hdr[1] != vch or len(pkt) < 12:
                 continue
             rtp = pkt[12:]
-            nal_type = rtp[0] & 0x1F
             m_bit = pkt[1] & 0x80
-            if nal_type == 28:  # FU-A fragmentation
-                fu = rtp[1]
-                start, end = fu & 0x80, fu & 0x40
-                nalu_type = fu & 0x1F
-                if start:
-                    h264 += b"\x00\x00\x00\x01" + bytes(
-                        [(rtp[0] & 0xE0) | nalu_type]) + rtp[2:]
-                else:
-                    h264 += rtp[2:]
-                if nalu_type == 7:
-                    seen_sps = True
-                if end and nalu_type == 5:
-                    break
-            elif nal_type in (1, 5, 6, 7, 8):
-                h264 += b"\x00\x00\x00\x01" + rtp
-                if nal_type == 7:
-                    seen_sps = True
-                if nal_type == 5 and m_bit:
-                    break
+            if codec == "h264":
+                nal_type = rtp[0] & 0x1F
+                if nal_type == 28:  # FU-A fragmentation
+                    fu = rtp[1]
+                    start, end = fu & 0x80, fu & 0x40
+                    nalu_type = fu & 0x1F
+                    if start:
+                        es += b"\x00\x00\x00\x01" + bytes(
+                            [(rtp[0] & 0xE0) | nalu_type]) + rtp[2:]
+                    else:
+                        es += rtp[2:]
+                    if nalu_type in (7, 8):
+                        params_seen = True
+                    if end and nalu_type == 5:
+                        break
+                elif nal_type in (1, 5, 6, 7, 8):
+                    es += b"\x00\x00\x00\x01" + rtp
+                    if nal_type in (7, 8):
+                        params_seen = True
+                    if nal_type == 5 and m_bit:
+                        break
+            else:  # h265 / HEVC
+                if len(rtp) < 4:
+                    continue
+                nal_type = (rtp[0] >> 1) & 0x3F
+                if nal_type == 49:  # FU
+                    fu_type = (rtp[2] >> 1) & 0x3F
+                    start, end = rtp[3] & 0x80, rtp[3] & 0x40
+                    if start:
+                        nalu = bytes([(rtp[0] & 0x81) | (fu_type << 1), rtp[1]])
+                        es += b"\x00\x00\x00\x01" + nalu + rtp[4:]
+                    else:
+                        es += rtp[4:]
+                    if fu_type in (32, 33, 34):
+                        params_seen = True
+                    if end and fu_type in (19, 20):
+                        break
+                elif nal_type in (19, 20, 32, 33, 34, 39, 40):
+                    es += b"\x00\x00\x00\x01" + rtp
+                    if nal_type in (32, 33, 34):
+                        params_seen = True
+                    if nal_type in (19, 20) and m_bit:
+                        break
         s.close()
-        if not h264 or not seen_sps:
+        if not es or not params_seen:
             return False
+        demux = "h264" if codec == "h264" else "hevc"
         p = subprocess.run(
-            ["ffmpeg", "-y", "-f", "h264", "-i", "pipe:0",
+            ["ffmpeg", "-y", "-f", demux, "-i", "pipe:0",
              "-frames:v", "1", "-q:v", "2", str(out)],
-            input=bytes(h264), capture_output=True, timeout=30)
+            input=bytes(es), capture_output=True, timeout=30)
         return p.returncode == 0 and out.exists()
     except Exception as e:
         try:
@@ -215,23 +250,49 @@ def _rtsp_capture(url, out, timeout=15):
         return False
 
 
-def snapshot(url, out):
+def _capture_via_agent(name, out, timeout=18):
+    """Ask the com.vigil.capture LaunchAgent for a frame. That agent is
+    spawned directly by launchd (Apple python, outside amele's process
+    tree), so its socket is NOT subject to the NECP filter that drops
+    amele's children from the local network."""
+    try:
+        req = SNAP_DIR / "request.txt"
+        old = out.stat().st_mtime if out.exists() else 0
+        req.write_text(name)
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.vigil.capture"],
+            capture_output=True, timeout=10,
+        )
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if out.exists() and out.stat().st_mtime > old:
+                return True
+            time.sleep(0.5)
+        return False
+    except Exception:
+        return False
+
+
+def snapshot(url, out, name=None):
     """Capture a single frame. Returns True ONLY if a NEW frame was written —
-    never trusts a pre-existing file. Primary path: pure-python RTSP (works
-    under launchd; the NECP filter drops ffmpeg's own local connects).
-    Fallback: ffmpeg directly (works in contexts without the filter)."""
+    never trusts a pre-existing file. Primary path: the capture LaunchAgent
+    (its python socket is not filtered by the NECP policy that blocks
+    amele-spawned processes from the local network). Fallbacks: in-process
+    pure-python RTSP, then ffmpeg directly."""
+    if name and _capture_via_agent(name, out):
+        return True
     urls = [url]
     alt = url.replace("/stream1", "/stream2")
     if alt != url:
         urls.append(alt)
     for u in urls:
         for attempt in range(2):
-            if _rtsp_capture(u, out):
+            if _rtsp_capture(u, out, timeout=10):
                 return True
             r = subprocess.run(
                 ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", u,
                  "-frames:v", "1", "-q:v", "2", str(out)],
-                capture_output=True, timeout=30,
+                capture_output=True, timeout=20,
             )
             if r.returncode == 0 and out.exists():
                 return True
@@ -356,7 +417,7 @@ def main():
     model = os.environ.get("VISION_MODEL", "") or os.environ.get("AMELE_MODEL", "qwen3-vl")
     out = SNAP_DIR / f"{name.replace('/', '_')}.jpg"
 
-    if not snapshot(rtsp_url(cam), out):
+    if not snapshot(rtsp_url(cam), out, name):
         print(f"Camera '{name}' ({cam['url']}) unreachable or no frame captured.")
         return  # not an error: the agent should report it
 

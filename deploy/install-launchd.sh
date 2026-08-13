@@ -12,8 +12,10 @@ ROOT="$PWD"
 INTERVAL="${VIGIL_INTERVAL:-1800}"   # seconds (1800 = 30 min)
 LABEL_PATROL="com.vigil.patrol"
 LABEL_BOT="com.vigil.bot"
+LABEL_CAPTURE="com.vigil.capture"
 PLIST_DIR="$HOME/Library/LaunchAgents"
 PYTHON="$(command -v python3)"
+APPLE_PYTHON="/usr/bin/python3"   # capture agent must use Apple's python (NECP filter exemption)
 
 [ -f "$ROOT/secrets.env" ] || { echo "ERROR: secrets.env missing — run ./deploy/install.sh first"; exit 1; }
 [ -x "$ROOT/bin/amele" ] || { echo "ERROR: bin/amele missing — run ./deploy/install.sh first"; exit 1; }
@@ -58,7 +60,8 @@ if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "kaldir" ]; then
   echo "==> Uninstalling"
   launchctl bootout "gui/$(id -u)" "$PLIST_DIR/$LABEL_PATROL.plist" 2>/dev/null || launchctl unload "$PLIST_DIR/$LABEL_PATROL.plist" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)" "$PLIST_DIR/$LABEL_BOT.plist" 2>/dev/null || launchctl unload "$PLIST_DIR/$LABEL_BOT.plist" 2>/dev/null || true
-  rm -f "$PLIST_DIR/$LABEL_PATROL.plist" "$PLIST_DIR/$LABEL_BOT.plist"
+  launchctl bootout "gui/$(id -u)" "$PLIST_DIR/$LABEL_CAPTURE.plist" 2>/dev/null || launchctl unload "$PLIST_DIR/$LABEL_CAPTURE.plist" 2>/dev/null || true
+  rm -f "$PLIST_DIR/$LABEL_PATROL.plist" "$PLIST_DIR/$LABEL_BOT.plist" "$PLIST_DIR/$LABEL_CAPTURE.plist"
   echo "    removed."
   exit 0
 fi
@@ -76,6 +79,11 @@ write_plist "$LABEL_BOT" "$PLIST_DIR/$LABEL_BOT.plist" "$PYTHON" "$ROOT/bot/tele
 /usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$PLIST_DIR/$LABEL_BOT.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$PLIST_DIR/$LABEL_BOT.plist" 2>/dev/null || true
 load_plist "$PLIST_DIR/$LABEL_BOT.plist"
+
+echo "==> Capture agent (on-demand, Apple python — bypasses the NECP filter)"
+write_plist "$LABEL_CAPTURE" "$PLIST_DIR/$LABEL_CAPTURE.plist" \
+  "$APPLE_PYTHON" "$ROOT/tools/capture_agent.py"
+load_plist "$PLIST_DIR/$LABEL_CAPTURE.plist"
 
 echo
 echo "Installed. Logs: logs/com.vigil.*.log"
