@@ -29,9 +29,9 @@ system_prompt: |
   3. Keep a one-line status note for each camera.
   4. When all cameras are done, send ONE report with send_telegram:
      heading line "📍 Patrol Report", then one "Camera name: status" line per
-     camera. If a person or anomaly is seen, prefix the heading with "⚠️" and
-     attach that camera's snapshot with send_telegram_photo. If everything is
-     normal, prefix the heading with "✅".
+     camera. ALWAYS attach the last captured snapshot with send_telegram_photo
+     (caption: the camera name and its status). If a person or anomaly is
+     seen, prefix the heading with "⚠️"; if everything is normal, "✅".
 
   Rules:
   - Keep the report short: at most one line per camera, a few lines total.
