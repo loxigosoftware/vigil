@@ -105,47 +105,65 @@ def _rtsp_capture(url, out, timeout=15):
         base = f"rtsp://{host}:{port}{path}"
         s = _socket.create_connection((host, port), timeout=timeout)
         s.settimeout(timeout)
-        auth = b""
+        challenge = None   # parsed digest challenge, once received
 
-        def _basic(user, pw):
-            return b"Authorization: Basic " + _b64.b64encode(
-                f"{user}:{pw}".encode()) + b"\r\n"
-
-        def _digest(method, uri, user, pw, challenge):
-            import hashlib as _hl
+        def _parse_challenge(head):
+            chall = "".join(
+                ln.split(b":", 1)[1].decode("latin-1") + "\n"
+                for ln in head.split(b"\r\n")
+                if ln.lower().startswith(b"www-authenticate:"))
+            if not chall:
+                return None
             import re as _re
-            realm = _re.search(r'realm="([^"]*)"', challenge)
-            nonce = _re.search(r'nonce="([^"]*)"', challenge)
+            realm = _re.search(r'realm="([^"]*)"', chall)
+            nonce = _re.search(r'nonce="([^"]*)"', chall)
             if not realm or not nonce:
                 return None
-            realm, nonce = realm.group(1), nonce.group(1)
-            qop_m = _re.search(r'qop="([^"]*)"', challenge)
-            qop = qop_m.group(1).split(",")[0] if qop_m else None
-            opaque = _re.search(r'opaque="([^"]*)"', challenge)
+            qop_m = _re.search(r'qop="([^"]*)"', chall)
+            opaque = _re.search(r'opaque="([^"]*)"', chall)
+            return {
+                "digest": "Digest" in chall,
+                "realm": realm.group(1),
+                "nonce": nonce.group(1),
+                "qop": qop_m.group(1).split(",")[0] if qop_m else None,
+                "opaque": opaque.group(1) if opaque else None,
+            }
+
+        def _auth_header(method, uri):
+            if challenge is None or not user:
+                return b""
+            if not challenge["digest"]:
+                return b"Authorization: Basic " + _b64.b64encode(
+                    f"{user}:{pw}".encode()) + b"\r\n"
+            import hashlib as _hl
+            realm, nonce = challenge["realm"], challenge["nonce"]
             ha1 = _hl.md5(f"{user}:{realm}:{pw}".encode()).hexdigest()
             ha2 = _hl.md5(f"{method}:{uri}".encode()).hexdigest()
-            if qop:
+            if challenge["qop"]:
                 cnonce = _hl.md5(os.urandom(8)).hexdigest()[:16]
                 resp = _hl.md5(
-                    f"{ha1}:{nonce}:00000001:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+                    f"{ha1}:{nonce}:00000001:{cnonce}:{challenge['qop']}:{ha2}"
+                    .encode()).hexdigest()
                 hdr = (f'Digest username="{user}", realm="{realm}", '
-                       f'nonce="{nonce}", uri="{uri}", qop={qop}, '
+                       f'nonce="{nonce}", uri="{uri}", qop={challenge["qop"]}, '
                        f'nc=00000001, cnonce="{cnonce}", response="{resp}"')
             else:
                 resp = _hl.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
                 hdr = (f'Digest username="{user}", realm="{realm}", '
                        f'nonce="{nonce}", uri="{uri}", response="{resp}"')
-            if opaque:
-                hdr += f', opaque="{opaque.group(1)}"'
+            if challenge["opaque"]:
+                hdr += f', opaque="{challenge["opaque"]}"'
             return (hdr + "\r\n").encode()
 
-        def req(method, cseq, extra=b""):
-            nonlocal auth
+        def req(method, cseq, extra=b"", ruri=None):
+            nonlocal challenge
+            uri = ruri or base
             # header order matters on this camera: extra headers (Accept,
             # Transport, Session) must come BEFORE CSeq/User-Agent, auth last;
             # the UA mimics ffmpeg's — this camera ignores/refuses others
-            r = (f"{method} {base} RTSP/1.0\r\n").encode() + extra + \
-                f"CSeq: {cseq}\r\nUser-Agent: Lavf60.3.100\r\n".encode() + auth + b"\r\n"
+            r = (f"{method} {uri} RTSP/1.0\r\n").encode() + extra + \
+                f"CSeq: {cseq}\r\nUser-Agent: Lavf60.3.100\r\n".encode() + \
+                _auth_header(method, uri) + b"\r\n"
             s.sendall(r)
             buf = b""
             while b"\r\n\r\n" not in buf:
@@ -158,14 +176,9 @@ def _rtsp_capture(url, out, timeout=15):
                 status = int(head.split(b" ", 2)[1])
             except Exception:
                 return head, body
-            if status == 401 and user and not auth:
-                chall = "".join(
-                    ln.split(b":", 1)[1].decode("latin-1") + "\n"
-                    for ln in head.split(b"\r\n")
-                    if ln.lower().startswith(b"www-authenticate:"))
-                d = _digest(method, base, user, pw, chall) if "Digest" in chall else None
-                auth = d if d else _basic(user, pw)
-                return req(method, cseq + 1, extra)
+            if status == 401 and user and challenge is None:
+                challenge = _parse_challenge(head)
+                return req(method, cseq + 1, extra, uri)
             return head, body
 
         h, _ = req("OPTIONS", 1)
@@ -191,7 +204,8 @@ def _rtsp_capture(url, out, timeout=15):
         ctrl = control if control.startswith("rtsp://") else (
             base.rstrip("/") + "/" + control.lstrip("/"))
         h, _ = req("SETUP", 3,
-                   b"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")
+                   b"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n",
+                   ruri=ctrl)
         if not h.startswith(b"RTSP/1.0 200"):
             return False
         # video channel = first interleaved id from the SETUP response
@@ -207,7 +221,7 @@ def _rtsp_capture(url, out, timeout=15):
             elif low.startswith(b"session:"):
                 session = line.split(b":", 1)[1].strip().split(b";")[0]
         play_extra = (b"Session: " + session + b"\r\n") if session else b""
-        h, _ = req("PLAY", 4, play_extra)
+        h, _ = req("PLAY", 4, play_extra, ruri=base + "/")
         if not h.startswith(b"RTSP/1.0 200"):
             return False
 
