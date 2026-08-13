@@ -297,11 +297,17 @@ def _rtsp_capture(url, out, timeout=15):
         if not es or not params_seen:
             return False
         demux = "h264" if codec == "h264" else "hevc"
+        out.unlink(missing_ok=True)   # never let a stale file pass the check
         p = subprocess.run(
             ["ffmpeg", "-y", "-f", demux, "-i", "pipe:0",
              "-frames:v", "1", "-q:v", "2", str(out)],
             input=bytes(es), capture_output=True, timeout=30)
-        return p.returncode == 0 and out.exists()
+        # ffmpeg may exit non-zero when the bitstream ends at a frame
+        # boundary — the decoded frame is still valid
+        if out.exists() and out.stat().st_size > 5000:
+            return True
+        out.unlink(missing_ok=True)
+        return False
     except Exception as e:
         try:
             s.close()
