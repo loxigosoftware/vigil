@@ -53,7 +53,7 @@ If any camera shows an `ALERT`, the heading is prefixed with ⚠️; when everyt
 
 **Note:** the agent (amele) never sees images itself — its loop is text. Image analysis happens inside the `camera_status.py` tool (RTSP frame + vision model call), which returns text to the agent. The agent compiles those texts into the report and sends it via Telegram.
 
-The vision model can run **locally** (Ollama, fully offline) or be an **API** (OpenAI / OpenRouter / Anthropic / any OpenAI-compatible endpoint) — one switch in `secrets.env` decides. The frame capture is a small pure-Python RTSP client (H.264 and H.265), so it works with any brand of IP camera that speaks RTSP.
+The vision model can run **locally** on the same machine (fully offline, e.g. via Ollama) or be an **API** (OpenAI / OpenRouter / Anthropic / any OpenAI-compatible endpoint) — one switch in `secrets.env` decides. The frame capture is a small pure-Python RTSP client (H.264 and H.265), so it works with any brand of IP camera that speaks RTSP.
 
 ## Repository layout
 
@@ -74,7 +74,7 @@ deploy/                # installer + scheduling helpers
 
 - Python 3.10+
 - [ffmpeg](https://ffmpeg.org/) (on PATH)
-- A **vision model** — either local via [Ollama](https://ollama.com) (`ollama pull <vision-model>`) or an API endpoint (OpenAI, OpenRouter, Anthropic, vLLM, ...). Ollama is not required; any vision-capable model works.
+- A **vision model** — local on the same machine (e.g. via [Ollama](https://ollama.com), LM Studio) or an API endpoint (OpenAI, OpenRouter, Anthropic, vLLM, ...). No specific runtime or model is required; any vision-capable model works.
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 - IP cameras with RTSP streams, reachable from the machine running vigil
 
@@ -94,8 +94,8 @@ The installer checks python3/ffmpeg/curl/git, downloads the amele binary into `b
 
 ### Prerequisites per platform
 
-- **macOS**: `brew install python3 ffmpeg`; add a vision model with Ollama (`brew install ollama && ollama pull <vision-model>`) or use an API.
-- **Linux**: `sudo apt install python3 ffmpeg git curl` (Debian/Ubuntu); install Ollama for a local model, or use an API.
+- **macOS**: `brew install python3 ffmpeg`; install a local model runtime (e.g. `brew install ollama && ollama pull <vision-model>`) or use an API.
+- **Linux**: `sudo apt install python3 ffmpeg git curl` (Debian/Ubuntu); install a local model runtime (e.g. Ollama), or use an API.
 - **Windows**: enable [WSL2](https://learn.microsoft.com/windows/wsl/install) with a distro (e.g. Ubuntu) and follow the Linux steps inside it.
 
 ## Configuration
@@ -118,21 +118,21 @@ Two files are created by the installer — fill them in:
 
 ### Providers — local or API (single switch)
 
-Everything — the agent loop *and* the image analysis — follows one switch in `secrets.env`. Local (Ollama) is the default; an API is optional.
+Everything — the agent loop *and* the image analysis — follows one switch in `secrets.env`. A local model is the default (the template points at Ollama on localhost); an API is optional.
 
 | Setup | `PROVIDER_TYPE` | `BASE_URL` | `API_KEY` | Model example |
 |---|---|---|---|---|
-| **Local (default)** | `openai` | `http://localhost:11434/v1` | *(empty)* | any Ollama vision model |
+| **Local (default)** | `openai` | `http://localhost:11434/v1` | *(empty)* | any local vision model (Ollama, ...) |
 | **OpenAI** | `openai` | `https://api.openai.com/v1` | `sk-...` | `gpt-4.1-mini` |
 | **OpenRouter** | `openai` | `https://openrouter.ai/api/v1` | `sk-or-...` | `openai/gpt-4o-mini` |
 | **Anthropic** | `anthropic` | `https://api.anthropic.com` | `sk-ant-...` | `claude-3-5-sonnet` |
 
-- **Local** = Ollama on the same machine, works fully offline. **API** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API. A specific model is not required — pick any vision-capable one you have (`AMELE_MODEL`, default `qwen3-vl` in the template, is just a starting point).
+- **Local** = any model runtime on the same machine (Ollama, LM Studio, llama.cpp, ...), works fully offline. **API** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API. A specific runtime or model is not required — pick any vision-capable one you have (`AMELE_MODEL`, default `qwen3-vl` in the template, is just a starting point).
 - Image analysis follows the same switch: a local `BASE_URL` (localhost) uses Ollama's native API; an online one uses the provider's vision format. `VISION_MODEL` overrides the image-analysis model (defaults to `AMELE_MODEL`); `VISION_MODE` forces a specific mode if you ever need to.
 - With `anthropic`, `BASE_URL` must **not** end in `/v1`. With OpenAI-compatible endpoints it normally does.
 - Gemini is not natively supported by amele — use it through OpenRouter (`google/gemini-2.0-flash` style model names).
 - API keys live only in `secrets.env` (never in git) and are referenced from `agent.yaml` as `${API_KEY}` — amele rejects literal keys in YAML.
-- Check `ollama list` for locally available models; on a powerful machine you can pick a bigger one.
+- With Ollama, `ollama list` shows the locally available models; on a powerful machine you can pick a bigger one.
 
 **Report language:** follows the `system_prompt` in `agent.yaml` — the default is English; change it if you prefer your own language.
 
