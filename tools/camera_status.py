@@ -141,8 +141,10 @@ def _rtsp_capture(url, out, timeout=15):
 
         def req(method, cseq, extra=b""):
             nonlocal auth
-            r = (f"{method} {base} RTSP/1.0\r\nCSeq: {cseq}\r\n"
-                 f"User-Agent: vigil\r\n").encode() + auth + extra + b"\r\n"
+            # header order matters on this camera: extra headers (Accept,
+            # Transport, Session) must come BEFORE CSeq/User-Agent, auth last
+            r = (f"{method} {base} RTSP/1.0\r\n").encode() + extra + \
+                f"CSeq: {cseq}\r\nUser-Agent: vigil\r\n".encode() + auth + b"\r\n"
             s.sendall(r)
             buf = b""
             while b"\r\n\r\n" not in buf:
@@ -193,13 +195,18 @@ def _rtsp_capture(url, out, timeout=15):
             return False
         # video channel = first interleaved id from the SETUP response
         vch = 0
+        session = None
         for line in h.split(b"\r\n"):
-            if line.lower().startswith(b"transport:") and b"interleaved=" in line:
+            low = line.lower()
+            if low.startswith(b"transport:") and b"interleaved=" in line:
                 try:
                     vch = int(line.split(b"interleaved=")[1].split(b"-")[0])
                 except Exception:
                     pass
-        h, _ = req("PLAY", 4)
+            elif low.startswith(b"session:"):
+                session = line.split(b":", 1)[1].strip().split(b";")[0]
+        play_extra = (b"Session: " + session + b"\r\n") if session else b""
+        h, _ = req("PLAY", 4, play_extra)
         if not h.startswith(b"RTSP/1.0 200"):
             return False
 
