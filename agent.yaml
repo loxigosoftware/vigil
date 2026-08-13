@@ -66,7 +66,7 @@ tools:
         Sends a text message to the owner via Telegram. Input (stdin): the
         text to send. Output (stdout): "ok" or an error.
       command: ["./tools/telegram_send.py"]
-      timeout: 30s
+      timeout: 60s
     - name: send_telegram_photo
       description: >
         Sends a photo to the owner via Telegram (the last captured frame).
