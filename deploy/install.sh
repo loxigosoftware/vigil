@@ -72,4 +72,4 @@ echo
 echo "Installation complete. Next steps:"
 echo "  1) Edit secrets.env and cameras.json"
 echo "  2) Manual test:   set -a; . secrets.env; set +a; bin/amele run agent.yaml \"patrol\""
-echo "  3) Scheduling:    macOS: ./deploy/kur-launchd.sh   |   Linux/WSL: cron or systemd (see README)"
+echo "  3) Scheduling:    macOS: ./deploy/install-launchd.sh   |   Linux/WSL: cron or systemd (see README)"

@@ -2,9 +2,9 @@
 # launchd jobs: (1) periodic patrol (default every 30 min), (2) Telegram bot (always on)
 #
 # Usage:
-#   ./deploy/kur-launchd.sh            # install
-#   ./deploy/kur-launchd.sh uninstall  # remove (the old "kaldir" still works)
-#   VIGIL_INTERVAL=900 ./deploy/kur-launchd.sh   # patrol every 15 min
+#   ./deploy/install-launchd.sh            # install
+#   ./deploy/install-launchd.sh uninstall  # remove (the old "kaldir" still works)
+#   VIGIL_INTERVAL=900 ./deploy/install-launchd.sh   # patrol every 15 min
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -78,4 +78,4 @@ load_plist "$PLIST_DIR/$LABEL_BOT.plist"
 
 echo
 echo "Installed. Logs: logs/com.vigil.*.log"
-echo "To uninstall: ./deploy/kur-launchd.sh uninstall"
+echo "To uninstall: ./deploy/install-launchd.sh uninstall"

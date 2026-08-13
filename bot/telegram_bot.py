@@ -6,7 +6,7 @@ On trigger it runs `bin/amele run agent.yaml ...`; the agent sends the report
 itself via send_telegram, the bot only reports start/finish.
 
 Run:        python3 bot/telegram_bot.py
-Scheduler:  macOS: deploy/kur-launchd.sh (keeps it alive) | Linux: systemd unit (see README)
+Scheduler:  macOS: deploy/install-launchd.sh (keeps it alive) | Linux: systemd unit (see README)
 
 Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (secrets.env)
 """

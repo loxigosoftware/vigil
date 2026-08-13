@@ -135,9 +135,9 @@ python3 tools/patrol.py --all                  # fallback deterministic patrol
 ### macOS — launchd
 
 ```bash
-./deploy/kur-launchd.sh              # patrol every 30 min + bot always on
-VIGIL_INTERVAL=900 ./deploy/kur-launchd.sh   # change to every 15 min
-./deploy/kur-launchd.sh uninstall    # remove
+./deploy/install-launchd.sh              # patrol every 30 min + bot always on
+VIGIL_INTERVAL=900 ./deploy/install-launchd.sh   # change to every 15 min
+./deploy/install-launchd.sh uninstall    # remove
 ```
 
 Installs two jobs: `com.vigil.patrol` (periodic patrol, logs in `logs/`) and `com.vigil.bot` (bot always running, KeepAlive).
