@@ -41,6 +41,7 @@ write_plist() {  # $1=label $2=plist $3..=program+args
     echo "<key>EnvironmentVariables</key><dict>${env_xml}</dict>"
     echo "<key>StandardOutPath</key><string>${ROOT}/logs/${label}.out.log</string>"
     echo "<key>StandardErrorPath</key><string>${ROOT}/logs/${label}.err.log</string>"
+    echo '</dict></plist>'
   } > "$plist"
 }
 
