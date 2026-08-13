@@ -1,4 +1,4 @@
-<p align="center"><img src="brand/vigil-logo.png" alt="vigil" width="340"></p>
+<p align="center"><img src="brand/vigil-icon.png" alt="vigil" width="150"></p>
 
 # vigil
 
