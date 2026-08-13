@@ -107,6 +107,38 @@ def _rtsp_capture(url, out, timeout=15):
         s.settimeout(timeout)
         auth = b""
 
+        def _basic(user, pw):
+            return b"Authorization: Basic " + _b64.b64encode(
+                f"{user}:{pw}".encode()) + b"\r\n"
+
+        def _digest(method, uri, user, pw, challenge):
+            import hashlib as _hl
+            import re as _re
+            realm = _re.search(r'realm="([^"]*)"', challenge)
+            nonce = _re.search(r'nonce="([^"]*)"', challenge)
+            if not realm or not nonce:
+                return None
+            realm, nonce = realm.group(1), nonce.group(1)
+            qop_m = _re.search(r'qop="([^"]*)"', challenge)
+            qop = qop_m.group(1).split(",")[0] if qop_m else None
+            opaque = _re.search(r'opaque="([^"]*)"', challenge)
+            ha1 = _hl.md5(f"{user}:{realm}:{pw}".encode()).hexdigest()
+            ha2 = _hl.md5(f"{method}:{uri}".encode()).hexdigest()
+            if qop:
+                cnonce = _hl.md5(os.urandom(8)).hexdigest()[:16]
+                resp = _hl.md5(
+                    f"{ha1}:{nonce}:00000001:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+                hdr = (f'Digest username="{user}", realm="{realm}", '
+                       f'nonce="{nonce}", uri="{uri}", qop={qop}, '
+                       f'nc=00000001, cnonce="{cnonce}", response="{resp}"')
+            else:
+                resp = _hl.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+                hdr = (f'Digest username="{user}", realm="{realm}", '
+                       f'nonce="{nonce}", uri="{uri}", response="{resp}"')
+            if opaque:
+                hdr += f', opaque="{opaque.group(1)}"'
+            return (hdr + "\r\n").encode()
+
         def req(method, cseq, extra=b""):
             nonlocal auth
             r = (f"{method} {base} RTSP/1.0\r\nCSeq: {cseq}\r\n"
@@ -119,10 +151,17 @@ def _rtsp_capture(url, out, timeout=15):
                     break
                 buf += c
             head, _, body = buf.partition(b"\r\n\r\n")
-            status = int(head.split(b" ", 2)[1])
+            try:
+                status = int(head.split(b" ", 2)[1])
+            except Exception:
+                return head, body
             if status == 401 and user and not auth:
-                auth = (b"Authorization: Basic "
-                        + _b64.b64encode(f"{user}:{pw}".encode()) + b"\r\n")
+                chall = "".join(
+                    ln.split(b":", 1)[1].decode("latin-1") + "\n"
+                    for ln in head.split(b"\r\n")
+                    if ln.lower().startswith(b"www-authenticate:"))
+                d = _digest(method, base, user, pw, chall) if "Digest" in chall else None
+                auth = d if d else _basic(user, pw)
                 return req(method, cseq, extra)
             return head, body
 
