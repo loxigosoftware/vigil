@@ -39,12 +39,20 @@ SNAP_DIR = ROOT / "snapshots"
 SNAP_DIR.mkdir(exist_ok=True)
 
 PROMPT = (
-    "This is a home security camera frame. Answer in 1-2 sentences.\n"
-    "Start with exactly one word: 'Clear' if nothing noteworthy is visible, "
-    "'ALERT' if a person, animal, vehicle, motion or any anomaly is visible, "
-    "or 'Unclear' if you cannot tell. Then briefly describe what you see, "
-    "e.g. 'Clear — quiet paved driveway with a stop sign, no people' or "
-    "'ALERT — a person walking near the gate'."
+    "This is a home security camera frame. Report ONLY on people, vehicles "
+    "and animals — do not describe the scene (no driveways, trees, fences, "
+    "weather or buildings).\n"
+    "Start with exactly one word: 'Clear' if no person, vehicle or animal is "
+    "visible; 'ALERT' if any is visible; 'Unclear' if you cannot tell.\n"
+    "Then give details only for what is present:\n"
+    "- people: count, gender, age range (e.g. '2 people: adult male 30-40, "
+    "child 5-10')\n"
+    "- vehicles: type and color, license plate if readable (e.g. 'white "
+    "sedan, plate 34ABC123')\n"
+    "- animals: cat or dog, breed if identifiable (e.g. 'orange cat, breed "
+    "unclear')\n"
+    "Examples: 'Clear' | 'ALERT — one adult female, 25-35' | 'ALERT — black "
+    "pickup truck, plate unreadable'"
 )
 
 
