@@ -96,12 +96,12 @@ def _frame_ok(path):
 def _rtsp_capture(url, out, timeout=15):
     """Pure-python RTSP snapshot.
 
-    A network extension (Tailscale's, NECP policy) drops local-network
-    connects from third-party binaries (ffmpeg) when they are spawned by
-    launchd — 'No route to host'. Apple-signed processes (python3, nc) are
-    not filtered, so we do the RTSP handshake + RTP receive in Python and
-    decode the captured H.264 access unit LOCALLY with ffmpeg from a pipe
-    (no network socket involved)."""
+    A network extension (e.g. a VPN/firewall filter, NECP policy) can drop
+    local-network connects from third-party binaries (ffmpeg) when they are
+    spawned by launchd — 'No route to host'. Apple-signed processes (python3,
+    nc) are not filtered, so we do the RTSP handshake + RTP receive in Python
+    and decode the captured H.264/H.265 access unit LOCALLY with ffmpeg from
+    a pipe (no network socket involved)."""
     import base64 as _b64
     import socket as _socket
     import struct as _struct

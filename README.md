@@ -1,52 +1,68 @@
 # vigil 🎥
 
-Local AI agent that patrols your IP cameras on a schedule and reports to Telegram — running entirely on your own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
+My local AI agent that patrols my IP cameras on a schedule and reports to Telegram — running entirely on my own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
 
 ## What it does
 
-- **Periodic patrol** (default every 30 min): walks through every camera in your list, analyzes the live view with a local vision model (Ollama + Qwen3-VL), and sends a report to Telegram:
-  ```
-  📍 Patrol Report
-  • Garage: vehicle in place, door closed
-  • Garden: no motion
-  • Front Door: ⚠️ a person is visible
-  ```
-- **On demand** (Telegram bot): message the bot "check" and it runs a patrol and sends the report immediately.
-- **Anomaly snapshot**: the frame of any camera with a person / motion / anomaly is attached to the report.
+- **Periodic patrol** (default every 30 min): my setup walks through every camera in my list, captures a fresh frame over RTSP, analyzes it with a vision model, and sends a report to Telegram.
+- **On demand** (Telegram bot): I message the bot "check" (or "kontrol et") and it runs a patrol and sends the report immediately.
+- **Photo per camera**: every camera's frame is attached to the report with a one-line caption.
 - **Fallback mode**: if the agent loop ever misbehaves, `patrol.py --all` does the same job deterministically.
+
+### What I check and how I report
+
+The vision model looks for **people, vehicles and animals** only — the scene itself is ignored. For each camera I get one of three status words:
+
+- **`Clear`** — no person, vehicle or animal visible
+- **`ALERT`** — at least one is visible, with details (count, gender, age range; vehicle type, color and license plate if readable; cat/dog and breed if identifiable)
+- **`Unclear`** — the frame could not be judged
+
+A camera that cannot connect is reported as **unreachable**, never skipped silently. The summary message looks like this:
+
+```
+📍 Patrol Report
+• Garage: Clear — no people or vehicles
+• Garden: Clear — nothing unusual
+• Street: ⚠️ ALERT — black pickup truck, plate 34ABC123
+• Front Door: ⚠️ ALERT — 1 person (adult male, 30-40)
+```
+
+If any camera shows an `ALERT`, the heading is prefixed with ⚠️; when everything is normal it gets ✅. Each photo's caption carries the same one-line status.
 
 ## Architecture
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │  Your machine (local, no cloud dependency)  │
-                    │                                             │
-  Telegram ───────► │  bot/telegram_bot.py  (listens for "check")  │
-    (you)     ◄───  │        │                                    │
-                    │        ▼                                    │
-                    │  bin/amele run agent.yaml  (agent loop)     │
-                    │        │  tools (subprocess)                │
-                    │  ┌─────┴─────────────────────┐              │
-                    │  │ camera_status.py          │              │
-                    │  │  ffmpeg → frame           │              │
-                    │  │  Ollama /api/chat (vision)│              │
+                    │  My machine (local, no cloud dependency)     │
+                    │                                              │
+ Telegram ───────►  │  bot/telegram_bot.py  (listens for "check")  │
+    (me)     ◄───   │        │                                     │
+                    │        ▼                                     │
+                    │  bin/amele run agent.yaml  (agent loop)      │
+                    │        │  tools (subprocess)                 │
+                    │  ┌─────┴─────────────────────┐               │
+                    │  │ camera_status.py          │               │
+                    │  │  RTSP capture → frame     │               │
+                    │  │  vision model → analysis  │               │
                     │  │ telegram_send.py / _photo.py             │
-                    │  └───────────────────────────┘              │
-                    │        ▲                                    │
-                    │  Ollama (localhost:11434) ◄── cameras (RTSP) │
+                    │  └───────────────────────────┘               │
+                    │        ▲                                     │
+                    │  vision model ◄── cameras (RTSP, any brand)  │
                     └─────────────────────────────────────────────┘
 ```
 
-**Note:** the agent (amele) never sees images itself — its loop is text. Image analysis happens inside the `camera_status.py` tool (ffmpeg frame + Ollama vision call), which returns text to the agent. The agent compiles those texts into the report and sends it via Telegram.
+**Note:** the agent (amele) never sees images itself — its loop is text. Image analysis happens inside the `camera_status.py` tool (RTSP frame + vision model call), which returns text to the agent. The agent compiles those texts into the report and sends it via Telegram.
+
+The vision model can run **locally** (Ollama, fully offline) or be an **API** (OpenAI / OpenRouter / Anthropic / any OpenAI-compatible endpoint) — one switch in `secrets.env` decides. The frame capture is a small pure-Python RTSP client (H.264 and H.265), so it works with any brand of IP camera that speaks RTSP.
 
 ## Repository layout
 
 ```
 agent.yaml             # agent definition (model, prompt, tools, budgets)
-cameras.example.json   # camera list template → cameras.json (your real file never enters git)
+cameras.example.json   # camera list template → cameras.json
 secrets.env.example    # secret settings template → secrets.env
 tools/                 # amele tools (subprocess scripts)
-  camera_status.py     #   capture frame + vision analysis
+  camera_status.py     #   RTSP frame capture + vision analysis
   telegram_send.py     #   Telegram text
   telegram_photo.py    #   Telegram photo
   patrol.py            #   fallback deterministic patrol
@@ -58,7 +74,7 @@ deploy/                # installer + scheduling helpers
 
 - Python 3.10+
 - [ffmpeg](https://ffmpeg.org/) (on PATH)
-- [Ollama](https://ollama.com) with a vision model: `ollama pull qwen3-vl`
+- A **vision model** — either local via [Ollama](https://ollama.com) (`ollama pull <vision-model>`) or an API endpoint (OpenAI, OpenRouter, Anthropic, vLLM, ...). Ollama is not required; any vision-capable model works.
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 - IP cameras with RTSP streams, reachable from the machine running vigil
 
@@ -78,15 +94,15 @@ The installer checks python3/ffmpeg/curl/git, downloads the amele binary into `b
 
 ### Prerequisites per platform
 
-- **macOS**: `brew install python3 ffmpeg` and [install Ollama](https://ollama.com) (or `brew install ollama`).
-- **Linux**: `sudo apt install python3 ffmpeg git curl` (Debian/Ubuntu), then [install Ollama](https://ollama.com/download/linux).
-- **Windows**: enable [WSL2](https://learn.microsoft.com/windows/wsl/install) with a distro (e.g. Ubuntu) and follow the Linux steps inside it. Simplest setup: install Ollama inside WSL as well, so everything runs on localhost. (If you'd rather run Ollama on the Windows side, point `OLLAMA_HOST` at the Windows host IP — WSL2's localhost is separate from Windows'.)
+- **macOS**: `brew install python3 ffmpeg`; add a vision model with Ollama (`brew install ollama && ollama pull <vision-model>`) or use an API.
+- **Linux**: `sudo apt install python3 ffmpeg git curl` (Debian/Ubuntu); install Ollama for a local model, or use an API.
+- **Windows**: enable [WSL2](https://learn.microsoft.com/windows/wsl/install) with a distro (e.g. Ubuntu) and follow the Linux steps inside it.
 
 ## Configuration
 
 Two files are created by the installer — fill them in:
 
-**1. `secrets.env`** — Telegram bot + RTSP credentials:
+**1. `secrets.env`** — provider, Telegram and RTSP credentials:
 - Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and paste the token into `TELEGRAM_BOT_TOKEN`.
 - Message your bot once, then find your chat ID (one-liner is in `secrets.env.example`) and put it in `TELEGRAM_CHAT_ID`.
 - Put your cameras' RTSP username/password in `RTSP_USER` / `RTSP_PASS` (credentials are never embedded in the camera list).
@@ -98,25 +114,25 @@ Two files are created by the installer — fill them in:
   { "name": "Garden", "url": "rtsp://192.168.1.51:554/stream1" }
 ]
 ```
-`name` is the label shown in reports (any language), `url` is the RTSP stream address. Credentials are added automatically from `secrets.env`.
+`name` is the label shown in reports (any language), `url` is the RTSP stream address. Credentials are added automatically from `secrets.env`. Any RTSP-speaking camera works — Tapo, Akuvox, Hikvision, Dahua, Reolink, Axis, ...
 
-### Providers — local or online (single switch)
+### Providers — local or API (single switch)
 
-Everything — the agent loop *and* the image analysis — follows one switch in `secrets.env`. Local (Ollama) is the default; online is optional.
+Everything — the agent loop *and* the image analysis — follows one switch in `secrets.env`. Local (Ollama) is the default; an API is optional.
 
-| Setup | `PROVIDER_TYPE` | `BASE_URL` | `API_KEY` | `AMELE_MODEL` |
+| Setup | `PROVIDER_TYPE` | `BASE_URL` | `API_KEY` | Model example |
 |---|---|---|---|---|
-| **Local (default)** | `openai` | `http://localhost:11434/v1` | *(empty)* | `qwen3-vl` |
+| **Local (default)** | `openai` | `http://localhost:11434/v1` | *(empty)* | any Ollama vision model |
 | **OpenAI** | `openai` | `https://api.openai.com/v1` | `sk-...` | `gpt-4.1-mini` |
 | **OpenRouter** | `openai` | `https://openrouter.ai/api/v1` | `sk-or-...` | `openai/gpt-4o-mini` |
 | **Anthropic** | `anthropic` | `https://api.anthropic.com` | `sk-ant-...` | `claude-3-5-sonnet` |
 
-- **Local** = Ollama on the same machine, works fully offline. **Online** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API.
+- **Local** = Ollama on the same machine, works fully offline. **API** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API. A specific model is not required — pick any vision-capable one you have (`AMELE_MODEL`, default `qwen3-vl` in the template, is just a starting point).
 - Image analysis follows the same switch: a local `BASE_URL` (localhost) uses Ollama's native API; an online one uses the provider's vision format. `VISION_MODEL` overrides the image-analysis model (defaults to `AMELE_MODEL`); `VISION_MODE` forces a specific mode if you ever need to.
 - With `anthropic`, `BASE_URL` must **not** end in `/v1`. With OpenAI-compatible endpoints it normally does.
 - Gemini is not natively supported by amele — use it through OpenRouter (`google/gemini-2.0-flash` style model names).
 - API keys live only in `secrets.env` (never in git) and are referenced from `agent.yaml` as `${API_KEY}` — amele rejects literal keys in YAML.
-- Check `ollama list` for locally available models; on a powerful machine you can pick a bigger one (e.g. `qwen3-vl:30b`).
+- Check `ollama list` for locally available models; on a powerful machine you can pick a bigger one.
 
 **Report language:** follows the `system_prompt` in `agent.yaml` — the default is English; change it if you prefer your own language.
 
@@ -140,7 +156,7 @@ VIGIL_INTERVAL=900 ./deploy/install-launchd.sh   # change to every 15 min
 ./deploy/install-launchd.sh uninstall    # remove
 ```
 
-Installs two jobs: `com.vigil.patrol` (periodic patrol, logs in `logs/`) and `com.vigil.bot` (bot always running, KeepAlive).
+Installs three jobs: `com.vigil.patrol` (periodic patrol, logs in `logs/`), `com.vigil.bot` (bot always running, KeepAlive) and `com.vigil.capture` (frame-capture agent for launchd-spawned runs).
 
 ### Linux / WSL2 — cron (simplest)
 
@@ -177,21 +193,25 @@ wsl -d Ubuntu -- bash -lc 'cd /path/to/vigil && set -a && . secrets.env && set +
 
 ## Telegram usage
 
-Send the bot "check", "/check" or "patrol" → it runs a patrol and the report arrives when done. (Turkish triggers "kontrol et" / "devriye" still work.) The bot only responds to the owner's `TELEGRAM_CHAT_ID`.
+Send the bot "check", "/check" or "patrol" → it runs a patrol and the report arrives when done. (Turkish triggers "kontrol et" / "devriye" still work.) The bot only responds to the owner's `TELEGRAM_CHAT_ID` — anyone else who messages it is silently ignored.
 
 ## Security notes
 
-- `secrets.env` and `cameras.json` never enter git — even though this repo is public, your home network layout and credentials stay private.
-- amele's workspace sandbox is **accident prevention, not a security boundary** (per its own docs). The real boundary is the user account the agent runs under.
-- **Prompt injection:** text/posters in a camera view could trick the model into odd messages. Our tools can only "capture + analyze + message Telegram", so the blast radius is limited — still, don't run the agent as root.
+- `secrets.env` and `cameras.json` are gitignored — even though this repo is public, credentials and your home network layout stay private.
+- amele's workspace sandbox is **accident prevention, not a security boundary** (per its own docs). The real boundary is the user account the agent runs under — don't run it as root.
+- **Prompt injection:** text/posters in a camera view could trick the model into odd messages. The tools can only "capture + analyze + message Telegram", so the blast radius is limited.
 - amele is young (v0.1.0, single developer) — treat vigil as a messenger, not an alarm system. Don't base critical security decisions on it.
 
 ## Known limitations / ideas
 
 - amele's loop has no image support → vision work lives in the tool (deliberate design).
-- Ollama's OpenAI-compatible `/v1` endpoint tool-calling is expected to work with qwen3-vl; if it gets stuck, update Ollama or use `patrol.py --all` fallback.
+- Some cameras set a cap on simultaneous RTSP connections — if the phone app is streaming, a patrol capture may need a retry (the capture path retries automatically).
 - Ideas: ONVIF motion events as triggers, per-camera notes, weather in the report, multiple chat IDs.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+© Loxigo — www.loxigo.com
