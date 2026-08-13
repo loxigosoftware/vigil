@@ -74,16 +74,29 @@ def rtsp_url(cam):
 
 
 def snapshot(url, out):
-    """Capture a single frame with ffmpeg. TCP transport (UDP fails behind NAT/firewalls)."""
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", url,
-             "-frames:v", "1", "-q:v", "2", str(out)],
-            capture_output=True, timeout=45,
-        )
-    except subprocess.TimeoutExpired:
-        return False
-    return out.exists()
+    """Capture a single frame with ffmpeg. TCP transport (UDP fails behind
+    NAT/firewalls). Returns True ONLY if ffmpeg actually wrote a new frame —
+    never trusts a pre-existing file, so a stale snapshot can never be
+    reported as live. If the main stream is busy (e.g. the phone app is
+    viewing it), retries and falls back to the sub-stream (stream2)."""
+    urls = [url]
+    alt = url.replace("/stream1", "/stream2")
+    if alt != url:
+        urls.append(alt)
+    for u in urls:
+        for attempt in range(2):
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", u,
+                 "-frames:v", "1", "-q:v", "2", str(out)],
+                capture_output=True, timeout=45,
+            )
+            if r.returncode == 0 and out.exists():
+                return True
+            # ffmpeg failed: remove any stale leftover so it is never
+            # mistaken for a fresh frame
+            out.unlink(missing_ok=True)
+            time.sleep(2)
+    return False
 
 
 def base_url():
