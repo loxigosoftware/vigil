@@ -41,8 +41,11 @@ def main():
         urls.append(alt)
     ok = False
     for u in urls:
-        if cs._rtsp_capture(u, out, timeout=12):
-            ok = True
+        for attempt in range(2):
+            if cs._rtsp_capture(u, out, timeout=12):
+                ok = True
+                break
+        if ok:
             break
     print("ok" if ok else "failed")
     return 0 if ok else 1

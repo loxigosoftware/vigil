@@ -73,6 +73,26 @@ def rtsp_url(cam):
     return url
 
 
+def _frame_ok(path):
+    """Reject near-uniform (corrupted) JPEGs. Solid pink/gray decodes from a
+    broken bitstream have almost no luma variation; a real scene always does."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(path),
+             "-vf", "signalstats,metadata=print:file=-",
+             "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=20)
+        lo = hi = None
+        for line in (r.stdout or "").splitlines():
+            if "YMIN=" in line:
+                lo = float(line.split("YMIN=")[1].split()[0])
+            elif "YMAX=" in line:
+                hi = float(line.split("YMAX=")[1].split()[0])
+        return lo is not None and hi is not None and (hi - lo) >= 12
+    except Exception:
+        return False
+
+
 def _rtsp_capture(url, out, timeout=15):
     """Pure-python RTSP snapshot.
 
@@ -228,6 +248,7 @@ def _rtsp_capture(url, out, timeout=15):
 
         es = bytearray()
         params_seen = False
+        idr_seen = False
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -240,7 +261,15 @@ def _rtsp_capture(url, out, timeout=15):
             pkt = recv_exact(ln)
             if hdr[1] != vch or len(pkt) < 12:
                 continue
-            rtp = pkt[12:]
+            # proper RTP header: skip CSRCs and any extension
+            cc = pkt[0] & 0x0F
+            off = 12 + 4 * cc
+            if pkt[0] & 0x10 and len(pkt) >= off + 4:
+                ext_len = _struct.unpack(">H", pkt[off + 2:off + 4])[0]
+                off += 4 + 4 * ext_len
+            if len(pkt) <= off:
+                continue
+            rtp = pkt[off:]
             m_bit = pkt[1] & 0x80
             if codec == "h264":
                 nal_type = rtp[0] & 0x1F
@@ -255,12 +284,16 @@ def _rtsp_capture(url, out, timeout=15):
                         es += rtp[2:]
                     if nalu_type in (7, 8):
                         params_seen = True
-                    if end and nalu_type == 5:
-                        break
+                    if nalu_type == 5:
+                        idr_seen = True
+                    if end and m_bit and nalu_type == 5:
+                        break  # IDR frame complete (end of access unit)
                 elif nal_type in (1, 5, 6, 7, 8):
                     es += b"\x00\x00\x00\x01" + rtp
                     if nal_type in (7, 8):
                         params_seen = True
+                    if nal_type == 5:
+                        idr_seen = True
                     if nal_type == 5 and m_bit:
                         break
             else:  # h265 / HEVC
@@ -277,26 +310,31 @@ def _rtsp_capture(url, out, timeout=15):
                         es += rtp[4:]
                     if fu_type in (32, 33, 34):
                         params_seen = True
-                    if end and fu_type in (19, 20):
-                        break
+                    if fu_type in (19, 20):
+                        idr_seen = True
+                    if end and m_bit and fu_type in (19, 20):
+                        break  # IDR frame complete (end of access unit)
                 elif nal_type in (19, 20, 32, 33, 34, 39, 40):
                     es += b"\x00\x00\x00\x01" + rtp
                     if nal_type in (32, 33, 34):
                         params_seen = True
+                    if nal_type in (19, 20):
+                        idr_seen = True
                     if nal_type in (19, 20) and m_bit:
                         break
         s.close()
-        if not es or not params_seen:
+        if not es or not params_seen or not idr_seen:
             return False
         demux = "h264" if codec == "h264" else "hevc"
         out.unlink(missing_ok=True)   # never let a stale file pass the check
-        p = subprocess.run(
+        subprocess.run(
             ["ffmpeg", "-y", "-f", demux, "-i", "pipe:0",
              "-frames:v", "1", "-q:v", "2", str(out)],
             input=bytes(es), capture_output=True, timeout=30)
         # ffmpeg may exit non-zero when the bitstream ends at a frame
-        # boundary — the decoded frame is still valid
-        if out.exists() and out.stat().st_size > 5000:
+        # boundary — the decoded frame is still valid; sanity-check the
+        # pixels so a corrupted decode is never reported as a live view
+        if out.exists() and out.stat().st_size > 5000 and _frame_ok(out):
             return True
         out.unlink(missing_ok=True)
         return False
