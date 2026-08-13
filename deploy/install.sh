@@ -5,6 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
+# macOS + Homebrew: /opt/homebrew/bin is not in the default non-interactive PATH
+if [ "$(uname -s)" = "Darwin" ] && [ -d /opt/homebrew/bin ]; then
+  export PATH="/opt/homebrew/bin:$PATH"
+fi
+
 echo "==> 1/6 Dependency check"
 for cmd in python3 ffmpeg curl git; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
