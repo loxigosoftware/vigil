@@ -129,6 +129,7 @@ Everything — the agent loop *and* the image analysis — follows one switch in
 
 - **Local** = any model runtime on the same machine (Ollama, LM Studio, llama.cpp, ...), works fully offline. **API** = any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, ...) or the native Anthropic API. A specific runtime or model is not required — pick any vision-capable one you have (`AMELE_MODEL`, default `qwen3-vl` in the template, is just a starting point).
 - Image analysis follows the same switch: a local `BASE_URL` (localhost) uses Ollama's native API; an online one uses the provider's vision format. `VISION_MODEL` overrides the image-analysis model (defaults to `AMELE_MODEL`); `VISION_MODE` forces a specific mode if you ever need to.
+- Wide-angle cameras make distant objects small, so when the full frame reports `Clear`/`Unclear` the tool re-checks an upscaled 2×2 grid of tiles (`VISION_TILES=2`, default). `VISION_TILES=0` disables the grid (full frame only), `VISION_TILES=3` uses a finer 3×3 grid.
 - With `anthropic`, `BASE_URL` must **not** end in `/v1`. With OpenAI-compatible endpoints it normally does.
 - Gemini is not natively supported by amele — use it through OpenRouter (`google/gemini-2.0-flash` style model names).
 - API keys live only in `secrets.env` (never in git) and are referenced from `agent.yaml` as `${API_KEY}` — amele rejects literal keys in YAML.

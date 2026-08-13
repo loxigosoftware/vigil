@@ -43,6 +43,9 @@ PROMPT = (
     "This is a home security camera frame. Report ONLY on people, vehicles "
     "and animals — do not describe the scene (no driveways, trees, fences, "
     "weather or buildings).\n"
+    "The camera is wide-angle: people, vehicles and animals may appear small "
+    "or distant — inspect the whole frame carefully before concluding "
+    "'Clear'.\n"
     "Start with exactly one word: 'Clear' if no person, vehicle or animal is "
     "visible; 'ALERT' if any is visible; 'Unclear' if you cannot tell.\n"
     "Then give details only for what is present:\n"
@@ -445,6 +448,72 @@ def analyze(path, model):
     return _openai(b64, model)
 
 
+def analyze_tiled(path, model, grid=2):
+    """Full-frame analysis, then — if it reports Clear/Unclear — a grid of
+    upscaled tiles so small/distant objects (a car far from a wide-angle
+    camera) are not missed. VISION_TILES=0 disables (full frame only),
+    2 = 2x2 tiles, 3 = 3x3 tiles (default 2)."""
+    import pathlib as _pl
+    import subprocess as _sp
+
+    def probe_size(p):
+        try:
+            r = _sp.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                         "-show_entries", "stream=width,height",
+                         "-of", "csv=p=0", str(p)], capture_output=True, text=True, timeout=10)
+            w, h = r.stdout.strip().split(",")[:2]
+            return int(w), int(h)
+        except Exception:
+            return None
+
+    def first_word(t):
+        return (t or "").strip().split()[0].lower() if (t or "").strip() else ""
+
+    full = analyze(path, model)
+    fw = first_word(full)
+    if fw != "clear" and fw != "unclear":
+        return full  # ALERT already — tiles not needed
+    try:
+        tiles = int(os.environ.get("VISION_TILES", "2"))
+    except ValueError:
+        tiles = 2
+    if tiles < 2:
+        return full
+    size = probe_size(path)
+    if not size:
+        return full
+    w, h = size
+    tw, th = w // tiles, h // tiles
+    tmp = _pl.Path(f"/tmp/vigil_tile_{os.getpid()}.jpg")
+    any_unclear = fw == "unclear"
+    try:
+        for ty in range(tiles):
+            for tx in range(tiles):
+                r = _sp.run(
+                    ["ffmpeg", "-y", "-v", "error", "-i", str(path),
+                     "-vf", (f"crop={tw}:{th}:{tx * tw}:{ty * th},"
+                             f"scale=iw*2:ih*2"),
+                     "-q:v", "2", str(tmp)],
+                    capture_output=True, timeout=20)
+                if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 5000:
+                    continue
+                t = analyze(tmp, model)
+                tword = first_word(t)
+                if tword == "alert":
+                    tmp.unlink(missing_ok=True)
+                    return t  # first ALERT found wins; caller adds the camera name
+                if tword == "unclear":
+                    any_unclear = True
+        tmp.unlink(missing_ok=True)
+        return "Unclear — could not judge the whole frame" if any_unclear else full
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return full
+
+
 def _post(url, payload, headers, timeout=90):
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(),
@@ -534,7 +603,7 @@ def main():
         return  # not an error: the agent should report it
 
     try:
-        text = analyze(out, model)
+        text = analyze_tiled(out, model)
     except Exception as e:  # noqa: BLE001 — return text so the agent can report it
         print(f"Camera '{name}' frame captured but vision analysis failed: {e}")
         return
