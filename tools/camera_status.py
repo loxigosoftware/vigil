@@ -73,6 +73,16 @@ def rtsp_url(cam):
     return url
 
 
+def _debug(msg):
+    """TEMP: append diagnostics to logs/cs_debug.log (removed after diagnosis)."""
+    try:
+        (ROOT / "logs").mkdir(exist_ok=True)
+        with open(ROOT / "logs" / "cs_debug.log", "a") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
 def snapshot(url, out):
     """Capture a single frame with ffmpeg. TCP transport (UDP fails behind
     NAT/firewalls). Returns True ONLY if ffmpeg actually wrote a new frame —
@@ -95,6 +105,13 @@ def snapshot(url, out):
             # ffmpeg failed: remove any stale leftover so it is never
             # mistaken for a fresh frame
             out.unlink(missing_ok=True)
+            _debug(
+                f"[{os.getpid()}] ffmpeg rc={r.returncode} url={u} "
+                f"rtsp_user={'set' if os.environ.get('RTSP_USER') else 'MISSING'} "
+                f"rtsp_pass={'set' if os.environ.get('RTSP_PASS') else 'MISSING'} "
+                f"ffmpeg_path={subprocess.run(['which','ffmpeg'],capture_output=True,text=True).stdout.strip()} "
+                f"stderr={r.stderr[-200:]!r}"
+            )
             time.sleep(2)
     return False
 
