@@ -72,7 +72,7 @@ tools:
         Sends a photo to the owner via Telegram (the last captured frame).
         Input (stdin): the photo caption. Output: "ok" or an error.
       command: ["./tools/telegram_photo.py"]
-      timeout: 30s
+      timeout: 120s
 
 limits:
   max_turns: 40
