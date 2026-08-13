@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """telegram_photo — amele tool (subprocess).
 
-stdin: photo caption
-stdout: "ok" or an error message
-Sends snapshots/last.jpg (the most recently captured frame) via Telegram.
+stdin: camera name on the FIRST line, then the caption (photo text) on the
+following line(s). Sends snapshots/{camera_name}.jpg (fallback: last.jpg)
+via Telegram with that caption.
+
+Example stdin:
+    Main Entry New
+    Main Entry New: clear — empty driveway
 
 Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
@@ -16,15 +20,14 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def send_photo(caption):
+def send_photo(caption, photo):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat:
         return ("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars are "
                 "missing — see secrets.env")
-    photo = ROOT / "snapshots" / "last.jpg"
     if not photo.exists():
-        return "ERROR: snapshots/last.jpg missing — run camera_status first"
+        return f"ERROR: {photo} missing — run camera_status first"
 
     boundary = "----vigil"
     body = b""
@@ -34,7 +37,7 @@ def send_photo(caption):
                  f"{value}\r\n").encode()
     body += (f"--{boundary}\r\n"
              f"Content-Disposition: form-data; name=\"photo\"; "
-             f"filename=\"last.jpg\"\r\n"
+             f"filename=\"{photo.name}\"\r\n"
              f"Content-Type: image/jpeg\r\n\r\n").encode()
     body += photo.read_bytes() + b"\r\n--" + boundary.encode() + b"--\r\n"
 
@@ -51,4 +54,14 @@ def send_photo(caption):
 
 
 if __name__ == "__main__":
-    print(send_photo(sys.stdin.read().strip()))
+    text = sys.stdin.read().strip()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    photo = ROOT / "snapshots" / "last.jpg"
+    caption = text
+    if lines:
+        # first line = camera name -> that camera's own snapshot
+        cand = ROOT / "snapshots" / f"{lines[0].strip().replace('/', '_')}.jpg"
+        if cand.exists():
+            photo = cand
+            caption = "\n".join(lines[1:]).strip() or lines[0].strip()
+    print(send_photo(caption, photo))

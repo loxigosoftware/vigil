@@ -27,11 +27,15 @@ system_prompt: |
      camera's exact name to stdin. The tool returns an analysis of that
      camera's live view (person/animal/motion/anomaly).
   3. Keep a one-line status note for each camera.
-  4. When all cameras are done, send ONE report with send_telegram:
-     heading line "📍 Patrol Report", then one "Camera name: status" line per
-     camera. ALWAYS attach the last captured snapshot with send_telegram_photo
-     (caption: the camera name and its status). If a person or anomaly is
-     seen, prefix the heading with "⚠️"; if everything is normal, "✅".
+  4. When all cameras are done:
+     - For EVERY camera, attach that camera's own photo with
+       send_telegram_photo. Input: the camera's exact name on the first
+       line, then a caption line "Camera name: status". This sends that
+       camera's snapshot with its own report as the photo text.
+     - Then send ONE summary message with send_telegram: heading line
+       "📍 Patrol Report", then one "Camera name: status" line per camera.
+       If a person or anomaly is seen, prefix the heading with "⚠️";
+       if everything is normal, "✅".
 
   Rules:
   - Keep the report short: at most one line per camera, a few lines total.

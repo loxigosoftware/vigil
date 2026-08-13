@@ -118,6 +118,7 @@ def _ollama(b64, model):
         "model": model,
         "messages": [{"role": "user", "content": PROMPT, "images": [b64]}],
         "stream": False,
+        "keep_alive": -1,  # keep the vision model resident in memory
         "options": {"temperature": 0.1},
     }
     data = _post(f"{ollama_host()}/api/chat", payload, {})
