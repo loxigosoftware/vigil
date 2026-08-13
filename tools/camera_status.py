@@ -73,16 +73,6 @@ def rtsp_url(cam):
     return url
 
 
-def _debug(msg):
-    """TEMP: append diagnostics to logs/cs_debug.log (removed after diagnosis)."""
-    try:
-        (ROOT / "logs").mkdir(exist_ok=True)
-        with open(ROOT / "logs" / "cs_debug.log", "a") as f:
-            f.write(msg + "\n")
-    except Exception:
-        pass
-
-
 def _rtsp_capture(url, out, timeout=15):
     """Pure-python RTSP snapshot.
 
@@ -310,12 +300,11 @@ def _rtsp_capture(url, out, timeout=15):
             return True
         out.unlink(missing_ok=True)
         return False
-    except Exception as e:
+    except Exception:
         try:
             s.close()
         except Exception:
             pass
-        _debug(f"[rtsp_capture] {url[:40]}... err={e!r}")
         return False
 
 
