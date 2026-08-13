@@ -1,17 +1,17 @@
 # vigil 🎥
 
-My local AI agent that patrols my IP cameras on a schedule and reports to Telegram — running entirely on my own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
+A local AI agent that patrols your IP cameras on a schedule and reports to Telegram — running entirely on your own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
 
 ## What it does
 
-- **Periodic patrol** (default every 30 min): my setup walks through every camera in my list, captures a fresh frame over RTSP, analyzes it with a vision model, and sends a report to Telegram.
-- **On demand** (Telegram bot): I message the bot "check" (or "kontrol et") and it runs a patrol and sends the report immediately.
+- **Periodic patrol** (default every 30 min): walks through every camera in your list, captures a fresh frame over RTSP, analyzes it with a vision model, and sends a report to Telegram.
+- **On demand** (Telegram bot): message the bot "check" and it runs a patrol and sends the report immediately.
 - **Photo per camera**: every camera's frame is attached to the report with a one-line caption.
 - **Fallback mode**: if the agent loop ever misbehaves, `patrol.py --all` does the same job deterministically.
 
-### What I check and how I report
+### What the app checks and how it reports
 
-The vision model looks for **people, vehicles and animals** only — the scene itself is ignored. For each camera I get one of three status words:
+The vision model looks for **people, vehicles and animals** only — the scene itself is ignored. Each camera gets one of three status words:
 
 - **`Clear`** — no person, vehicle or animal visible
 - **`ALERT`** — at least one is visible, with details (count, gender, age range; vehicle type, color and license plate if readable; cat/dog and breed if identifiable)
@@ -33,10 +33,10 @@ If any camera shows an `ALERT`, the heading is prefixed with ⚠️; when everyt
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │  My machine (local, no cloud dependency)     │
+                    │  Your machine (local, no cloud dependency)   │
                     │                                              │
  Telegram ───────►  │  bot/telegram_bot.py  (listens for "check")  │
-    (me)     ◄───   │        │                                     │
+    (you)    ◄───   │        │                                     │
                     │        ▼                                     │
                     │  bin/amele run agent.yaml  (agent loop)      │
                     │        │  tools (subprocess)                 │
@@ -193,7 +193,7 @@ wsl -d Ubuntu -- bash -lc 'cd /path/to/vigil && set -a && . secrets.env && set +
 
 ## Telegram usage
 
-Send the bot "check", "/check" or "patrol" → it runs a patrol and the report arrives when done. (Turkish triggers "kontrol et" / "devriye" still work.) The bot only responds to the owner's `TELEGRAM_CHAT_ID` — anyone else who messages it is silently ignored.
+Send the bot "check", "/check" or "patrol" → it runs a patrol and the report arrives when done. The bot only responds to the owner's `TELEGRAM_CHAT_ID` — anyone else who messages it is silently ignored.
 
 ## Security notes
 
