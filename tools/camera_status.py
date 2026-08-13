@@ -83,35 +83,161 @@ def _debug(msg):
         pass
 
 
+def _rtsp_capture(url, out, timeout=15):
+    """Pure-python RTSP snapshot.
+
+    A network extension (Tailscale's, NECP policy) drops local-network
+    connects from third-party binaries (ffmpeg) when they are spawned by
+    launchd — 'No route to host'. Apple-signed processes (python3, nc) are
+    not filtered, so we do the RTSP handshake + RTP receive in Python and
+    decode the captured H.264 access unit LOCALLY with ffmpeg from a pipe
+    (no network socket involved)."""
+    import base64 as _b64
+    import socket as _socket
+    import struct as _struct
+    from urllib.parse import unquote as _unquote
+    from urllib.parse import urlparse as _urlparse
+    try:
+        u = _urlparse(url)
+        host, port = u.hostname, (u.port or 554)
+        path = u.path or "/"
+        user, pw = _unquote(u.username or ""), _unquote(u.password or "")
+        base = f"rtsp://{host}:{port}{path}"
+        s = _socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        auth = b""
+
+        def req(method, cseq, extra=b""):
+            nonlocal auth
+            r = (f"{method} {base} RTSP/1.0\r\nCSeq: {cseq}\r\n"
+                 f"User-Agent: vigil\r\n").encode() + auth + extra + b"\r\n"
+            s.sendall(r)
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                c = s.recv(4096)
+                if not c:
+                    break
+                buf += c
+            head, _, body = buf.partition(b"\r\n\r\n")
+            status = int(head.split(b" ", 2)[1])
+            if status == 401 and user and not auth:
+                auth = (b"Authorization: Basic "
+                        + _b64.b64encode(f"{user}:{pw}".encode()) + b"\r\n")
+                return req(method, cseq, extra)
+            return head, body
+
+        h, _ = req("OPTIONS", 1)
+        h, body = req("DESCRIBE", 2, b"Accept: application/sdp\r\n")
+        if not h.startswith(b"RTSP/1.0 200"):
+            return False
+        sdp = body.decode("latin-1")
+        control = "streamid=0"
+        for line in sdp.splitlines():
+            if line.startswith("a=control:"):
+                control = line.split(":", 1)[1].strip()
+        ctrl = control if control.startswith("rtsp://") else (
+            base.rstrip("/") + "/" + control.lstrip("/"))
+        h, _ = req("SETUP", 3,
+                   b"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")
+        if not h.startswith(b"RTSP/1.0 200"):
+            return False
+        # video channel = first interleaved id from the SETUP response
+        vch = 0
+        for line in h.split(b"\r\n"):
+            if line.lower().startswith(b"transport:") and b"interleaved=" in line:
+                try:
+                    vch = int(line.split(b"interleaved=")[1].split(b"-")[0])
+                except Exception:
+                    pass
+        h, _ = req("PLAY", 4)
+        if not h.startswith(b"RTSP/1.0 200"):
+            return False
+
+        def recv_exact(n):
+            buf = b""
+            while len(buf) < n:
+                c = s.recv(n - len(buf))
+                if not c:
+                    raise EOFError
+                buf += c
+            return buf
+
+        h264 = bytearray()
+        seen_sps = False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                hdr = recv_exact(4)
+            except (EOFError, _socket.timeout, OSError):
+                break
+            if hdr[0] != 0x24:
+                continue
+            ln = _struct.unpack(">H", hdr[2:4])[0]
+            pkt = recv_exact(ln)
+            if hdr[1] != vch or len(pkt) < 12:
+                continue
+            rtp = pkt[12:]
+            nal_type = rtp[0] & 0x1F
+            m_bit = pkt[1] & 0x80
+            if nal_type == 28:  # FU-A fragmentation
+                fu = rtp[1]
+                start, end = fu & 0x80, fu & 0x40
+                nalu_type = fu & 0x1F
+                if start:
+                    h264 += b"\x00\x00\x00\x01" + bytes(
+                        [(rtp[0] & 0xE0) | nalu_type]) + rtp[2:]
+                else:
+                    h264 += rtp[2:]
+                if nalu_type == 7:
+                    seen_sps = True
+                if end and nalu_type == 5:
+                    break
+            elif nal_type in (1, 5, 6, 7, 8):
+                h264 += b"\x00\x00\x00\x01" + rtp
+                if nal_type == 7:
+                    seen_sps = True
+                if nal_type == 5 and m_bit:
+                    break
+        s.close()
+        if not h264 or not seen_sps:
+            return False
+        p = subprocess.run(
+            ["ffmpeg", "-y", "-f", "h264", "-i", "pipe:0",
+             "-frames:v", "1", "-q:v", "2", str(out)],
+            input=bytes(h264), capture_output=True, timeout=30)
+        return p.returncode == 0 and out.exists()
+    except Exception as e:
+        try:
+            s.close()
+        except Exception:
+            pass
+        _debug(f"[rtsp_capture] {url[:40]}... err={e!r}")
+        return False
+
+
 def snapshot(url, out):
-    """Capture a single frame with ffmpeg. TCP transport (UDP fails behind
-    NAT/firewalls). Returns True ONLY if ffmpeg actually wrote a new frame —
-    never trusts a pre-existing file, so a stale snapshot can never be
-    reported as live. If the main stream is busy (e.g. the phone app is
-    viewing it), retries and falls back to the sub-stream (stream2)."""
+    """Capture a single frame. Returns True ONLY if a NEW frame was written —
+    never trusts a pre-existing file. Primary path: pure-python RTSP (works
+    under launchd; the NECP filter drops ffmpeg's own local connects).
+    Fallback: ffmpeg directly (works in contexts without the filter)."""
     urls = [url]
     alt = url.replace("/stream1", "/stream2")
     if alt != url:
         urls.append(alt)
     for u in urls:
         for attempt in range(2):
+            if _rtsp_capture(u, out):
+                return True
             r = subprocess.run(
                 ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", u,
                  "-frames:v", "1", "-q:v", "2", str(out)],
-                capture_output=True, timeout=45,
+                capture_output=True, timeout=30,
             )
             if r.returncode == 0 and out.exists():
                 return True
-            # ffmpeg failed: remove any stale leftover so it is never
-            # mistaken for a fresh frame
+            # failed: remove any stale leftover so it is never mistaken for
+            # a fresh frame
             out.unlink(missing_ok=True)
-            _debug(
-                f"[{os.getpid()}] ffmpeg rc={r.returncode} url={u} "
-                f"rtsp_user={'set' if os.environ.get('RTSP_USER') else 'MISSING'} "
-                f"rtsp_pass={'set' if os.environ.get('RTSP_PASS') else 'MISSING'} "
-                f"ffmpeg_path={subprocess.run(['which','ffmpeg'],capture_output=True,text=True).stdout.strip()} "
-                f"stderr={r.stderr[-200:]!r}"
-            )
             time.sleep(2)
     return False
 
