@@ -1,4 +1,6 @@
-# vigil 🎥
+<p align="center"><img src="brand/vigil-logo.png" alt="vigil" width="340"></p>
+
+# vigil
 
 A local AI agent that patrols your IP cameras on a schedule and reports to Telegram — running entirely on your own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
 
