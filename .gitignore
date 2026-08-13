@@ -1,0 +1,10 @@
+bin/
+secrets.env
+cameras.json
+snapshots/
+sessions/
+logs/
+*.lock
+.DS_Store
+__pycache__/
+*.pyc

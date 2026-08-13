@@ -1,0 +1,65 @@
+# vigil: ev kamera devriye ajanı (amele tabanlı).
+# Çalıştırma:  bin/amele run agent.yaml "Kamera devriyesi yap ve raporu gönder"
+# Ortam:       AMELE_MODEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RTSP_USER, RTSP_PASS, OLLAMA_HOST
+
+model: ${AMELE_MODEL}
+
+provider:
+  base_url: http://localhost:11434/v1   # Ollama'nın OpenAI-uyumlu ucu
+  api_key: ""                           # yerel model — anahtar gerekmez
+
+system_prompt: |
+  Sen evin kamera devriye ajanısın. Görevin: evdeki tüm kameraları tek tek
+  kontrol edip patrona kısa, net bir Türkçe raporu Telegram'dan göndermek.
+
+  İzlenecek adımlar:
+  1. cameras.json dosyasını fs_read ile oku (repo kökünde, JSON liste).
+  2. Listedeki HER kamera için camera_status aracını çağır ve stdin'e
+     kameranın tam adını yaz. Araç, o kameranın canlı görüntüsünün analizini
+     döndürür (insan/hayvan/hareket/anormallik).
+  3. Her kamera için bir satır durum notu tut.
+  4. Tüm kameralar bittikten sonra send_telegram ile TEK rapor gönder:
+     başlık satırı "📍 Devriye Raporu", altında her kamera için
+     "Kamera adı: durum". İnsan veya anormallik varsa başlığa "⚠️" koy ve
+     ilgili kameranın fotoğrafını send_telegram_photo ile ekle. Her şey
+     normalse başlığa "✅" koy.
+
+  Kurallar:
+  - Rapor kısa olsun: kamera başına en fazla bir satır, toplamda birkaç satır.
+  - Kamera adlarını cameras.json'daki gibi aynen kullan, değiştirme.
+  - Görüntüde insan varsa mutlaka belirt; emin değilsen "belirsiz" yaz.
+  - Bir kamera bağlanamazsa "bağlanamadı" diye raporla, atlama.
+  - Araç çıktılarını olduğu gibi kabul et; uydurma.
+
+workspace: .          # fs araçları yalnızca bu klasörü okuyabilir
+
+tools:
+  fs: true
+  subprocess:
+    - name: camera_status
+      description: >
+        Bir kameranın canlı görüntüsünü çeker, yerel görüntü modeliyle analiz
+        eder, ne görüldüğünü kısa Türkçe metin olarak döndürür. Girdi (stdin):
+        cameras.json'daki kamera adı. Çıktı (stdout): analiz metni veya hata.
+      command: ["./tools/camera_status.py"]
+      timeout: 120s
+    - name: send_telegram
+      description: >
+        Patrona Telegram'dan metin mesajı gönderir. Girdi (stdin): gönderilecek
+        metin. Çıktı (stdout): "ok" veya hata.
+      command: ["./tools/telegram_send.py"]
+      timeout: 30s
+    - name: send_telegram_photo
+      description: >
+        Patrona Telegram'dan fotoğraf gönderir (son çekilen kare). Girdi
+        (stdin): fotoğrafın alt yazısı (caption). Çıktı: "ok" veya hata.
+      command: ["./tools/telegram_photo.py"]
+      timeout: 30s
+
+limits:
+  max_turns: 40
+  max_tokens: 100000
+  timeout: 10m
+
+session_dir: ./sessions
+lock: true
