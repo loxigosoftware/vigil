@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="vigil — AI patrol for your IP cameras">
+  <!-- background -->
+  <rect width="1280" height="640" fill="#08130A"/>
+
+  <!-- viewfinder corner brackets (inside the 40pt safe area) -->
+  <g stroke="#00FF41" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.30">
+    <path d="M 44 80 V 44 H 80"/>
+    <path d="M 1200 44 H 1236 V 80"/>
+    <path d="M 44 560 V 596 H 80"/>
+    <path d="M 1200 596 V 560 H 1236"/>
+  </g>
+
+  <!-- faint monitoring rings behind the owl -->
+  <circle cx="268" cy="320" r="258" stroke="#00FF41" stroke-width="2" fill="none" opacity="0.06"/>
+  <circle cx="268" cy="320" r="210" stroke="#00FF41" stroke-width="2" fill="none" opacity="0.04"/>
+
+  <!-- owl: body -->
+  <ellipse cx="268" cy="385" rx="83" ry="86" fill="#0C2410" stroke="#00FF41" stroke-width="2.2" opacity="0.55"/>
+  <!-- owl: ear tufts -->
+  <path d="M 206 243 L 229 197 L 259 238 Z" fill="#0C2410" stroke="#00FF41" stroke-width="2.2" stroke-linejoin="round" opacity="0.55"/>
+  <path d="M 277 238 L 306 197 L 330 243 Z" fill="#0C2410" stroke="#00FF41" stroke-width="2.2" stroke-linejoin="round" opacity="0.55"/>
+  <!-- owl: head -->
+  <circle cx="268" cy="296" r="71" fill="#0C2410" stroke="#00FF41" stroke-width="2.2" opacity="0.55"/>
+  <!-- owl: eyes (soft halo + disc) -->
+  <circle cx="226" cy="287" r="34" fill="#00FF41" opacity="0.25"/>
+  <circle cx="310" cy="287" r="34" fill="#00FF41" opacity="0.25"/>
+  <circle cx="226" cy="287" r="30" fill="#00FF41"/>
+  <circle cx="310" cy="287" r="30" fill="#00FF41"/>
+  <circle cx="226" cy="287" r="12" fill="#06260B"/>
+  <circle cx="310" cy="287" r="12" fill="#06260B"/>
+  <circle cx="220" cy="281" r="3.3" fill="#B8FFCB"/>
+  <circle cx="304" cy="281" r="3.3" fill="#B8FFCB"/>
+  <!-- owl: beak -->
+  <path d="M 255 330 L 268 350 L 281 330 Z" fill="#00FF41" stroke="#00FF41" stroke-width="4.5" stroke-linejoin="round"/>
+  <!-- owl: chest V -->
+  <path d="M 247 385 L 268 412 L 289 385" stroke="#00FF41" stroke-width="7.4" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.95"/>
+
+  <!-- wordmark + tagline -->
+  <text x="560" y="292" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="136" font-weight="700" letter-spacing="0.03em" fill="#E6FFF0">vigil</text>
+  <text x="564" y="372" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="46" font-weight="500" fill="#00FF41">AI patrol for your IP cameras</text>
+  <text x="564" y="434" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="29" font-weight="400" fill="#7FA98C">Live-view analysis with a vision model,</text>
+  <text x="564" y="474" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="29" font-weight="400" fill="#7FA98C">reports to Telegram — runs on your own hardware.</text>
+
+  <!-- footer -->
+  <text x="1236" y="588" text-anchor="end" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="400" fill="#4A7A58">© Loxigo — www.loxigo.com</text>
+</svg>
