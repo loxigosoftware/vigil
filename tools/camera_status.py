@@ -144,13 +144,15 @@ def _rtsp_capture(url, out, timeout=15):
                 resp = _hl.md5(
                     f"{ha1}:{nonce}:00000001:{cnonce}:{challenge['qop']}:{ha2}"
                     .encode()).hexdigest()
-                hdr = (f'Digest username="{user}", realm="{realm}", '
-                       f'nonce="{nonce}", uri="{uri}", qop={challenge["qop"]}, '
-                       f'nc=00000001, cnonce="{cnonce}", response="{resp}"')
+                hdr = (f'Authorization: Digest username="{user}", '
+                       f'realm="{realm}", nonce="{nonce}", uri="{uri}", '
+                       f'qop={challenge["qop"]}, nc=00000001, '
+                       f'cnonce="{cnonce}", response="{resp}"')
             else:
                 resp = _hl.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
-                hdr = (f'Digest username="{user}", realm="{realm}", '
-                       f'nonce="{nonce}", uri="{uri}", response="{resp}"')
+                hdr = (f'Authorization: Digest username="{user}", '
+                       f'realm="{realm}", nonce="{nonce}", uri="{uri}", '
+                       f'response="{resp}"')
             if challenge["opaque"]:
                 hdr += f', opaque="{challenge["opaque"]}"'
             return (hdr + "\r\n").encode()
