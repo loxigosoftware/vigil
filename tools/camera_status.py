@@ -26,6 +26,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 import urllib.request
 
 # macOS + Homebrew: /opt/homebrew/bin is missing from minimal PATHs (launchd/cron/SSH)

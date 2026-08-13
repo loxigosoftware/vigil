@@ -57,15 +57,24 @@ def send_photo(caption, photo):
 if __name__ == "__main__":
     text = sys.stdin.read().strip()
     lines = [ln for ln in text.splitlines() if ln.strip()]
-    photo = ROOT / "snapshots" / "last.jpg"
+    photo = None
     caption = text
     if lines:
         cam_name = lines[0].strip()
         cand = ROOT / "snapshots" / f"{cam_name.replace('/', '_')}.jpg"
-        if cand.exists():
-            photo = cand
-            status = "\n".join(lines[1:]).strip() or cam_name
+        if not cand.exists():
+            # never fall back to another camera's (possibly stale) frame
+            print(f"ERROR: no snapshot for '{cam_name}' — camera_status failed for it")
+            sys.exit(1)
+        photo = cand
+        status = "\n".join(lines[1:]).strip()
+        if status:
             # guard: never let a literal "camera name:" template slip through
             status = re.sub(r"^camera\s+name\s*:\s*", "", status, flags=re.I).strip()
             caption = f"{cam_name}: {status}"
+        else:
+            caption = cam_name
+    if photo is None:
+        print("ERROR: expected the camera name on stdin")
+        sys.exit(1)
     print(send_photo(caption, photo))
