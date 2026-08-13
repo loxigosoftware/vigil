@@ -142,9 +142,10 @@ def _rtsp_capture(url, out, timeout=15):
         def req(method, cseq, extra=b""):
             nonlocal auth
             # header order matters on this camera: extra headers (Accept,
-            # Transport, Session) must come BEFORE CSeq/User-Agent, auth last
+            # Transport, Session) must come BEFORE CSeq/User-Agent, auth last;
+            # the UA mimics ffmpeg's — this camera ignores/refuses others
             r = (f"{method} {base} RTSP/1.0\r\n").encode() + extra + \
-                f"CSeq: {cseq}\r\nUser-Agent: vigil\r\n".encode() + auth + b"\r\n"
+                f"CSeq: {cseq}\r\nUser-Agent: Lavf60.3.100\r\n".encode() + auth + b"\r\n"
             s.sendall(r)
             buf = b""
             while b"\r\n\r\n" not in buf:
@@ -164,7 +165,7 @@ def _rtsp_capture(url, out, timeout=15):
                     if ln.lower().startswith(b"www-authenticate:"))
                 d = _digest(method, base, user, pw, chall) if "Digest" in chall else None
                 auth = d if d else _basic(user, pw)
-                return req(method, cseq, extra)
+                return req(method, cseq + 1, extra)
             return head, body
 
         h, _ = req("OPTIONS", 1)
