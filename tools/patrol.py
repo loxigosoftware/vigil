@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""patrol — yedek/test devriye modu. amele ajanı OLMADAN deterministik çalışır.
+"""patrol — fallback/test patrol mode. Runs deterministically WITHOUT the amele agent.
 
-Kullanım:
-  python3 tools/patrol.py --all    # tüm kameraları gez, Telegram raporu gönder
+Usage:
+  python3 tools/patrol.py --all    # walk every camera, send the report via Telegram
 
-Neden var: amele + Ollama tool-calling uyumu bozulursa veya ajan döngüsü
-takılırsa sistem yine de çalışsın diye. Mantık, agent.yaml'ın birebir aynısı:
-kamera gez → analiz et → rapor gönder → anormallik varsa fotoğraf ekle.
+Why it exists: if amele + Ollama tool-calling compatibility breaks, or the
+agent loop gets stuck, the system should still work. The logic mirrors
+agent.yaml exactly: walk cameras → analyze → send report → attach photos for
+anomalies.
 
-Ortam değişkenleri: RTSP_USER, RTSP_PASS, OLLAMA_HOST, AMELE_MODEL,
+Env vars: RTSP_USER, RTSP_PASS, OLLAMA_HOST, AMELE_MODEL,
 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import json
@@ -24,9 +25,9 @@ from camera_status import SNAP_DIR, analyze, load_cameras, rtsp_url, snapshot  #
 import telegram_photo  # noqa: E402
 import telegram_send  # noqa: E402
 
-ANOMALI_KELIMELER = [
-    "insan", "kişi", "adam", "kadın", "çocuk", "hareket", "yabancı",
-    "şüpheli", "açık", "kapı", "araç hareket",
+ANOMALY_KEYWORDS = [
+    "person", "man", "woman", "child", "motion", "movement", "stranger",
+    "suspicious", "open", "door", "vehicle",
 ]
 
 
@@ -35,42 +36,42 @@ def main():
     host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     cams = load_cameras()
     if not cams:
-        print("HATA: cameras.json boş — önce kamera listesini doldur.")
+        print("ERROR: cameras.json is empty — add your cameras first.")
         sys.exit(1)
 
-    satirlar = []
-    sorunlar = []
-    fotolar = []
+    lines = []
+    issues = []
+    photos = []
 
     for cam in cams:
         name = cam["name"]
         out = SNAP_DIR / f"{name.replace('/', '_')}.jpg"
         if not snapshot(rtsp_url(cam), out):
-            satirlar.append(f"• {name}: 🔴 bağlanamadı")
-            sorunlar.append(name)
+            lines.append(f"• {name}: 🔴 unreachable")
+            issues.append(name)
             continue
         try:
             txt = analyze(out, model, host)
         except Exception as e:  # noqa: BLE001
-            satirlar.append(f"• {name}: ⚠️ analiz hatası ({e})")
-            sorunlar.append(name)
+            lines.append(f"• {name}: ⚠️ analysis error ({e})")
+            issues.append(name)
             continue
-        satirlar.append(f"• {name}: {txt}")
-        if any(k in txt.lower() for k in ANOMALI_KELIMELER):
-            fotolar.append((name, txt))
+        lines.append(f"• {name}: {txt}")
+        if any(k in txt.lower() for k in ANOMALY_KEYWORDS):
+            photos.append((name, txt))
 
-    if sorunlar:
-        baslik = "⚠️ DEVRIYE RAPORU (sorun var)"
-    elif fotolar:
-        baslik = "⚠️ DEVRIYE RAPORU (dikkat gerektiren görüntü var)"
+    if issues:
+        heading = "⚠️ PATROL REPORT (issues found)"
+    elif photos:
+        heading = "⚠️ PATROL REPORT (something needs attention)"
     else:
-        baslik = "✅ DEVRIYE RAPORU — her şey normal"
+        heading = "✅ PATROL REPORT — all normal"
 
-    rapor = baslik + "\n" + "\n".join(satirlar)
-    print(rapor)
-    print(telegram_send.send(rapor))
+    report = heading + "\n" + "\n".join(lines)
+    print(report)
+    print(telegram_send.send(report))
 
-    for name, txt in fotolar:
+    for name, txt in photos:
         (SNAP_DIR / "last.jpg").write_bytes(
             (SNAP_DIR / f"{name.replace('/', '_')}.jpg").read_bytes()
         )

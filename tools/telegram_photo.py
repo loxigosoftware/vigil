@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""telegram_photo — amele aracı (subprocess tool).
+"""telegram_photo — amele tool (subprocess).
 
-stdin: fotoğrafın alt yazısı (caption)
-stdout: "ok" veya hata metni
-snapshots/last.jpg dosyasını (son çekilen kareyi) Telegram'dan gönderir.
+stdin: photo caption
+stdout: "ok" or an error message
+Sends snapshots/last.jpg (the most recently captured frame) via Telegram.
 
-Ortam değişkenleri: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import os
 import pathlib
@@ -20,13 +20,13 @@ def send_photo(caption):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat:
-        return ("HATA: TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ortam değişkenleri "
-                "eksik — secrets.env'e bak")
+        return ("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars are "
+                "missing — see secrets.env")
     photo = ROOT / "snapshots" / "last.jpg"
     if not photo.exists():
-        return "HATA: snapshots/last.jpg yok — önce camera_status çalışmalı"
+        return "ERROR: snapshots/last.jpg missing — run camera_status first"
 
-    boundary = "----devriye"
+    boundary = "----vigil"
     body = b""
     for field, value in [("chat_id", chat), ("caption", caption)]:
         body += (f"--{boundary}\r\n"
@@ -47,7 +47,7 @@ def send_photo(caption):
         with urllib.request.urlopen(req, timeout=60):
             return "ok"
     except urllib.error.HTTPError as e:
-        return f"HATA: Telegram {e.code}: {e.read().decode(errors='replace')[:200]}"
+        return f"ERROR: Telegram {e.code}: {e.read().decode(errors='replace')[:200]}"
 
 
 if __name__ == "__main__":

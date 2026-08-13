@@ -1,12 +1,12 @@
 [
   {
-    "name": "Garaj",
+    "name": "Garage",
     "url": "rtsp://192.168.1.50:554/stream1",
-    "not": "örnek — gerçek RTSP adresinle değiştir"
+    "note": "example — replace with your real RTSP address"
   },
   {
-    "name": "Bahçe",
+    "name": "Garden",
     "url": "rtsp://192.168.1.51:554/stream1",
-    "not": "örnek — gerçek RTSP adresinle değiştir"
+    "note": "example — replace with your real RTSP address"
   }
 ]

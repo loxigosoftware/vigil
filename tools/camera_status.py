@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""camera_status — amele aracı (subprocess tool).
+"""camera_status — amele tool (subprocess).
 
-stdin: kamera adı (cameras.json'daki 'name')
-stdout: o kameranın canlı görüntüsünün Türkçe analizi (veya hata metni)
+stdin: camera name (the 'name' in cameras.json)
+stdout: analysis of that camera's live view (or an error message)
 
-RTSP akışından ffmpeg ile tek kare çeker, Ollama'daki görüntü modeline
-gönderir, ne görüldüğünü kısaca döndürür. Son kare snapshots/last.jpg
-olarak saklanır (send_telegram_photo aracı onu gönderir).
+Captures a single frame from the RTSP stream with ffmpeg, sends it to the
+vision model in Ollama, and returns a short description of what is visible.
+The last frame is kept at snapshots/last.jpg (used by the send_telegram_photo
+tool).
 
-Ortam değişkenleri: RTSP_USER, RTSP_PASS, OLLAMA_HOST, AMELE_MODEL
+Env vars: RTSP_USER, RTSP_PASS, OLLAMA_HOST, AMELE_MODEL
 """
 import base64
 import json
@@ -29,7 +30,7 @@ def load_cameras():
 
 
 def rtsp_url(cam):
-    """cameras.json'daki url'ye RTSP_USER/RTSP_PASS'i ekler (url'de yoksa)."""
+    """Inject RTSP_USER/RTSP_PASS into the URL (unless already embedded)."""
     url = cam["url"]
     user = os.environ.get("RTSP_USER", "")
     pw = os.environ.get("RTSP_PASS", "")
@@ -39,7 +40,7 @@ def rtsp_url(cam):
 
 
 def snapshot(url, out):
-    """ffmpeg ile tek kare. TCP taşıması (NAT/firewall'da UDP başarısız olur)."""
+    """Capture a single frame with ffmpeg. TCP transport (UDP fails behind NAT/firewalls)."""
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", url,
@@ -52,12 +53,12 @@ def snapshot(url, out):
 
 
 def analyze(path, model, host):
-    """Görüntüyü Ollama /api/chat'e gönder, metin döndür."""
+    """Send the image to Ollama /api/chat and return the description text."""
     b64 = base64.b64encode(path.read_bytes()).decode()
     prompt = (
-        "Bu bir ev güvenlik kamerası karesi. Türkçe olarak 1-2 cümlede kısaca "
-        "anlat: insan var mı, hayvan var mı, hareket veya anormallik var mı, "
-        "araç var mı? Emin değilsen 'belirsiz' de."
+        "This is a home security camera frame. Describe it briefly in 1-2 "
+        "sentences: is there a person, an animal, motion, an anomaly, or a "
+        "vehicle? If unsure, say 'unclear'."
     )
     payload = {
         "model": model,
@@ -78,14 +79,14 @@ def analyze(path, model, host):
 def main():
     name = sys.stdin.read().strip()
     if not name:
-        print("HATA: stdin'den kamera adı bekleniyor (cameras.json'daki 'name')")
+        print("ERROR: expected a camera name on stdin (a 'name' from cameras.json)")
         sys.exit(1)
 
     cams = {c["name"]: c for c in load_cameras()}
     cam = cams.get(name)
     if not cam:
-        names = ", ".join(cams) or "(liste boş)"
-        print(f"HATA: '{name}' cameras.json'da yok. Mevcut kameralar: {names}")
+        names = ", ".join(cams) or "(list is empty)"
+        print(f"ERROR: '{name}' not found in cameras.json. Known cameras: {names}")
         sys.exit(1)
 
     model = os.environ.get("AMELE_MODEL", "qwen3-vl")
@@ -93,13 +94,13 @@ def main():
     out = SNAP_DIR / f"{name.replace('/', '_')}.jpg"
 
     if not snapshot(rtsp_url(cam), out):
-        print(f"Kamera '{name}' ({cam['url']}) bağlanamadı veya kare alınamadı.")
-        return  # hata değil: ajan bunu rapora işlesin
+        print(f"Camera '{name}' ({cam['url']}) unreachable or no frame captured.")
+        return  # not an error: the agent should report it
 
     try:
         text = analyze(out, model, host)
-    except Exception as e:  # noqa: BLE001 — ajanın raporlayabilmesi için metin dön
-        print(f"Kamera '{name}' karesi alındı ama görüntü analizi başarısız: {e}")
+    except Exception as e:  # noqa: BLE001 — return text so the agent can report it
+        print(f"Camera '{name}' frame captured but vision analysis failed: {e}")
         return
 
     (SNAP_DIR / "last.jpg").write_bytes(out.read_bytes())

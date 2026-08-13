@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""vigil Telegram botu — "kontrol et" deyince kamera devriyesini tetikler.
+"""vigil Telegram bot — triggers a camera patrol when the owner says "check".
 
-Uzun süreli çalışır (long-polling). Yalnızca TELEGRAM_CHAT_ID sahibine yanıt
-verir. Tetiklenince bin/amele run agent.yaml ... çalıştırır; ajan raporu
-kendisi send_telegram ile gönderir, bot sadece başlangıç/bitiş bilgisini verir.
+Runs long-lived (long-polling). Only responds to the owner's TELEGRAM_CHAT_ID.
+On trigger it runs `bin/amele run agent.yaml ...`; the agent sends the report
+itself via send_telegram, the bot only reports start/finish.
 
-Çalıştırma:  python3 bot/telegram_bot.py
-Zamanlayıcı: deploy/kur-launchd.sh (sürekli ayakta tutar)
+Run:        python3 bot/telegram_bot.py
+Scheduler:  macOS: deploy/kur-launchd.sh (keeps it alive) | Linux: systemd unit (see README)
 
-Ortam değişkenleri: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (secrets.env)
+Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (secrets.env)
 """
 import json
 import os
@@ -24,7 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def load_env():
-    """secrets.env'i ortama yükle (varsa)."""
+    """Load secrets.env into the environment (if present)."""
     env_file = ROOT / "secrets.env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -43,10 +43,10 @@ def api(method, **params):
         with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=65) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        print(f"Telegram API hatası {e.code}: {e.read().decode(errors='replace')[:200]}")
+        print(f"Telegram API error {e.code}: {e.read().decode(errors='replace')[:200]}")
         return None
     except Exception as e:  # noqa: BLE001
-        print(f"Telegram API hatası: {e}")
+        print(f"Telegram API error: {e}")
         return None
 
 
@@ -55,18 +55,18 @@ def send(chat_id, text):
 
 
 def run_patrol():
-    """amele ajanını çalıştır; (çıkış kodu, özet) döndür."""
+    """Run the amele agent; return (exit code, summary)."""
     amele = ROOT / "bin" / "amele"
     cmd = [str(amele), "run", "agent.yaml",
-           "Kamera devriyesi yap ve raporu Telegram'dan gönder."]
+           "Check all cameras and send the patrol report to Telegram."]
     try:
         p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600)
-        ozet = (p.stdout or "").strip().splitlines()[-1:] + (p.stderr or "").strip().splitlines()[-1:]
-        return p.returncode, " | ".join(ozet)[:300]
+        summary = (p.stdout or "").strip().splitlines()[-1:] + (p.stderr or "").strip().splitlines()[-1:]
+        return p.returncode, " | ".join(summary)[:300]
     except FileNotFoundError:
-        return -1, "bin/amele bulunamadı — önce deploy/install.sh çalıştır"
+        return -1, "bin/amele not found — run ./deploy/install.sh first"
     except subprocess.TimeoutExpired:
-        return -2, "devriye zaman aşımı (600s)"
+        return -2, "patrol timed out (600s)"
 
 
 def main():
@@ -74,14 +74,14 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token:
-        print("HATA: TELEGRAM_BOT_TOKEN eksik — secrets.env'i doldur.")
+        print("ERROR: TELEGRAM_BOT_TOKEN missing — fill in secrets.env.")
         sys.exit(1)
     if not chat:
-        print("HATA: TELEGRAM_CHAT_ID eksik. Botu doldur, kendine bir mesaj at, "
-              "secrets.env.example'daki komutla ID'yi bul, sonra tekrar başlat.")
+        print("ERROR: TELEGRAM_CHAT_ID missing. Message the bot, find your ID "
+              "with the one-liner in secrets.env.example, then restart.")
         sys.exit(1)
 
-    print("Vigil botu dinliyor... (Ctrl+C ile durdurur)")
+    print("Vigil bot listening... (Ctrl+C to stop)")
     offset = 0
     while True:
         r = api("getUpdates", offset=offset, timeout=50)
@@ -93,18 +93,20 @@ def main():
             msg = upd.get("message") or {}
             cid = str(msg.get("chat", {}).get("id", ""))
             if cid != chat:
-                continue  # yalnızca sahip
-            text = (msg.get("text") or "").strip().lower()
-            if text in ("/kontrol", "/devriye", "/start") or "kontrol" in text or "devriye" in text:
-                send(cid, "🕐 Devriye başladı — 14 kamerayı gezmem birkaç dakika sürebilir.")
-                code, ozet = run_patrol()
+                continue  # owner only
+            text = (msg.get("text") or "").strip()
+            lowered = text.lower()
+            if (text in ("/check", "/patrol", "/kontrol", "/devriye", "/start")
+                    or any(t in lowered for t in ("check", "patrol", "kontrol", "devriye"))):
+                send(cid, "🕐 Patrol started — checking all cameras; this may take a few minutes.")
+                code, summary = run_patrol()
                 if code == 0:
-                    send(cid, f"✅ Devriye tamamlandı — ayrıntılı rapor yukarıda. {ozet}")
+                    send(cid, f"✅ Patrol complete — full report above. {summary}")
                 else:
-                    send(cid, f"❌ Devriye hatası (çıkış {code}): {ozet}")
+                    send(cid, f"❌ Patrol failed (exit {code}): {summary}")
             elif text in ("/yardim", "/help"):
-                send(cid, "Vigil botu:\n/kontrol — kameraları kontrol et ve rapor gönder\n"
-                          "Not: 'kontrol et' yazman da yeterli.")
+                send(cid, "Vigil bot:\n/check — check all cameras and send the report\n"
+                          "You can also just type \"check\" (or \"kontrol et\").")
         time.sleep(1)
 
 

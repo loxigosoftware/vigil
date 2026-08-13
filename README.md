@@ -1,123 +1,181 @@
 # vigil 🎥
 
-Evdeki IP kameraları **düzenli aralıklarla gezen** ve Telegram'dan **kamera adıyla rapor** gönderen yerel AI ajanı. [amele](https://github.com/lasthumanintheloop/amele) üzerine kurulu: ajan tek bir YAML dosyası, runtime tek bir statik binary.
+Local AI agent that patrols your IP cameras on a schedule and reports to Telegram — running entirely on your own hardware. Built on [amele](https://github.com/lasthumanintheloop/amele): the agent is one YAML file, the runtime is one static binary.
 
-## Ne yapar?
+## What it does
 
-- **Periyodik devriye** (varsayılan 30 dk): tüm kameraları tek tek gez, görüntüleri yerel görüntü modeliyle (Ollama + Qwen3-VL) analiz et, Telegram'a rapor gönder:
+- **Periodic patrol** (default every 30 min): walks through every camera in your list, analyzes the live view with a local vision model (Ollama + Qwen3-VL), and sends a report to Telegram:
   ```
-  📍 Devriye Raporu
-  • Garaj: araç yerinde, kapı kapalı
-  • Bahçe: hareket yok
-  • Ön Kapı: ⚠️ insan görünüyor
+  📍 Patrol Report
+  • Garage: vehicle in place, door closed
+  • Garden: no motion
+  • Front Door: ⚠️ a person is visible
   ```
-- **İstediğin an** (Telegram botu): bota "kontrol et" yaz → ajan anında devriye yapıp raporu gönderir.
-- **Anormallik fotoğrafı**: insan/hareket/anormallik tespit edilen kameranın karesi rapora eklenir.
-- **Yedek mod**: ajan döngüsü sorun çıkarırsa `patrol.py --all` aynı işi deterministik yapar.
+- **On demand** (Telegram bot): message the bot "check" and it runs a patrol and sends the report immediately.
+- **Anomaly snapshot**: the frame of any camera with a person / motion / anomaly is attached to the report.
+- **Fallback mode**: if the agent loop ever misbehaves, `patrol.py --all` does the same job deterministically.
 
-## Mimari
+## Architecture
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │  Mac Studio (lokalde, internet'e bağımlı değil) │
+                    │  Your machine (local, no cloud dependency)  │
                     │                                             │
-  Telegram ───────► │  bot/telegram_bot.py  ("kontrol et" dinler)  │
-    (sen)     ◄───  │        │                                    │
+  Telegram ───────► │  bot/telegram_bot.py  (listens for "check")  │
+    (you)     ◄───  │        │                                    │
                     │        ▼                                    │
-                    │  bin/amele run agent.yaml  (ajan döngüsü)   │
+                    │  bin/amele run agent.yaml  (agent loop)     │
                     │        │  tools (subprocess)                │
                     │  ┌─────┴─────────────────────┐              │
                     │  │ camera_status.py          │              │
-                    │  │  ffmpeg → kare çek        │              │
-                    │  │  Ollama /api/chat (Qwen3-VL) analiz      │
+                    │  │  ffmpeg → frame           │              │
+                    │  │  Ollama /api/chat (vision)│              │
                     │  │ telegram_send.py / _photo.py             │
                     │  └───────────────────────────┘              │
                     │        ▲                                    │
-                    │  Ollama (localhost:11434) ◄── 14 kamera (RTSP)│
+                    │  Ollama (localhost:11434) ◄── cameras (RTSP) │
                     └─────────────────────────────────────────────┘
 ```
 
-**Önemli:** ajan (amele) görüntüyü kendisi GÖRMEZ — amele'nin döngüsü metindir. Görüntü analizini `camera_status.py` aracı yapar (ffmpeg ile kare + Ollama vision çağrısı) ve sonucu metin olarak ajana döndürür. Ajan bu metinleri derleyip raporu Telegram'dan gönderir.
+**Note:** the agent (amele) never sees images itself — its loop is text. Image analysis happens inside the `camera_status.py` tool (ffmpeg frame + Ollama vision call), which returns text to the agent. The agent compiles those texts into the report and sends it via Telegram.
 
-## Repo yapısı
+## Repository layout
 
 ```
-agent.yaml             # ajan tanımı (model, prompt, araçlar, bütçeler)
-cameras.json           # kamera listesi (ad + RTSP adresi)
-secrets.env.example    # gizli ayarlar şablonu → secrets.env
-tools/                 # amele araçları (subprocess scriptleri)
-  camera_status.py     #   kare çek + görüntü analizi
-  telegram_send.py     #   Telegram metin
-  telegram_photo.py    #   Telegram fotoğraf
-  patrol.py            #   yedek deterministik devriye
-bot/telegram_bot.py    # "kontrol et" tetikleyicisi (long-polling)
-deploy/                # kurulum + launchd zamanlayıcı
+agent.yaml             # agent definition (model, prompt, tools, budgets)
+cameras.example.json   # camera list template → cameras.json (your real file never enters git)
+secrets.env.example    # secret settings template → secrets.env
+tools/                 # amele tools (subprocess scripts)
+  camera_status.py     #   capture frame + vision analysis
+  telegram_send.py     #   Telegram text
+  telegram_photo.py    #   Telegram photo
+  patrol.py            #   fallback deterministic patrol
+bot/telegram_bot.py    # "check" trigger (long-polling)
+deploy/                # installer + scheduling helpers
 ```
 
-## Kurulum (Mac Studio)
+## Requirements
+
+- Python 3.10+
+- [ffmpeg](https://ffmpeg.org/) (on PATH)
+- [Ollama](https://ollama.com) with a vision model: `ollama pull qwen3-vl`
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- IP cameras with RTSP streams, reachable from the machine running vigil
+
+Supported platforms: **macOS**, **Linux**, and **Windows (via WSL2)**. The amele binary currently ships macOS (arm64/amd64) and Linux (arm64/amd64) builds — on Windows, run vigil inside WSL2.
+
+## Installation
+
+Clone, then run the installer:
 
 ```bash
+git clone https://github.com/loxigosoftware/vigil.git
 cd vigil
 ./deploy/install.sh
 ```
 
-Kurulum: python3/ffmpeg/curl kontrolü → amele binary'sini `bin/`'e indirir (v0.1.0) → `secrets.env` ve `cameras.json` oluşturur (şablonlardan kopyalar) → `agent.yaml`'i doğrular.
+The installer checks python3/ffmpeg/curl/git, downloads the amele binary into `bin/`, creates `secrets.env` and `cameras.json` from templates, and validates `agent.yaml`.
 
-Kurulum oluşturduktan sonra iki dosyayı düzenle:
+### Prerequisites per platform
 
-**1. `secrets.env`** — Telegram botu + RTSP kimlik bilgileri:
-- Telegram'da @BotFather'a gir, `/newbot` ile bot aç, token'ı `TELEGRAM_BOT_TOKEN`'a yapıştır.
-- Bota kendinden bir mesaj at, sonra chat ID'ni bul (secrets.env.example içindeki tek satırlık komutla) ve `TELEGRAM_CHAT_ID`'e yaz.
-- Kameraların RTSP kullanıcı/şifresini `RTSP_USER` / `RTSP_PASS`'e yaz (adreslere gömülmez).
+- **macOS**: `brew install python3 ffmpeg` and [install Ollama](https://ollama.com) (or `brew install ollama`).
+- **Linux**: `sudo apt install python3 ffmpeg git curl` (Debian/Ubuntu), then [install Ollama](https://ollama.com/download/linux).
+- **Windows**: enable [WSL2](https://learn.microsoft.com/windows/wsl/install) with a distro (e.g. Ubuntu) and follow the Linux steps inside it. Simplest setup: install Ollama inside WSL as well, so everything runs on localhost. (If you'd rather run Ollama on the Windows side, point `OLLAMA_HOST` at the Windows host IP — WSL2's localhost is separate from Windows'.)
 
-**2. `cameras.json`** — 14 kameranı ekle:
+## Configuration
+
+Two files are created by the installer — fill them in:
+
+**1. `secrets.env`** — Telegram bot + RTSP credentials:
+- Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and paste the token into `TELEGRAM_BOT_TOKEN`.
+- Message your bot once, then find your chat ID (one-liner is in `secrets.env.example`) and put it in `TELEGRAM_CHAT_ID`.
+- Put your cameras' RTSP username/password in `RTSP_USER` / `RTSP_PASS` (credentials are never embedded in the camera list).
+
+**2. `cameras.json`** — list every camera you have (as many or as few as that is):
 ```json
 [
-  { "name": "Garaj", "url": "rtsp://192.168.1.50:554/stream1" },
-  { "name": "Bahçe", "url": "rtsp://192.168.1.51:554/stream1" }
+  { "name": "Garage", "url": "rtsp://192.168.1.50:554/stream1" },
+  { "name": "Garden", "url": "rtsp://192.168.1.51:554/stream1" }
 ]
 ```
-`name` raporda görünen ad (Türkçe karakter serbest), `url` RTSP akış adresi. Kullanıcı/şifre `secrets.env`'den otomatik eklenir.
+`name` is the label shown in reports (any language), `url` is the RTSP stream address. Credentials are added automatically from `secrets.env`.
 
-Model: `secrets.env` içinde `AMELE_MODEL=qwen3-vl` (varsayılan). `ollama list` ile kontrol et; 96GB RAM'de `qwen3-vl:30b` gibi daha güçlü bir sürüm de seçebilirsin (8b'nin 32K context'i dar kalabilir).
+Model: `AMELE_MODEL=qwen3-vl` (default) in `secrets.env`. Check `ollama list`; on a powerful machine you can pick a bigger model (e.g. `qwen3-vl:30b`).
 
-## Test
+**Report language:** follows the `system_prompt` in `agent.yaml` — the default is English; change it if you prefer your own language.
+
+## First patrol
 
 ```bash
 set -a; . secrets.env; set +a
-bin/amele validate agent.yaml                  # yapılandırma doğru mu
-python3 tools/telegram_send.py --test          # Telegram bağlantısı
-bin/amele run agent.yaml "devriye yap"         # elle devriye (raporu Telegram'a atar)
-python3 tools/patrol.py --all                  # yedek deterministik devriye
+bin/amele validate agent.yaml                  # is the config valid?
+python3 tools/telegram_send.py --test          # Telegram connection (expect a test message)
+bin/amele run agent.yaml "patrol"              # manual patrol → report lands in Telegram
+python3 tools/patrol.py --all                  # fallback deterministic patrol
 ```
 
-## Zamanlama: launchd (macOS)
+## Scheduling
+
+### macOS — launchd
 
 ```bash
-./deploy/kur-launchd.sh              # 30 dk'da bir devriye + bot sürekli
-VIGIL_INTERVAL=900 ./deploy/kur-launchd.sh   # 15 dk'ya çevir
-./deploy/kur-launchd.sh kaldir       # kaldır
+./deploy/kur-launchd.sh              # patrol every 30 min + bot always on
+VIGIL_INTERVAL=900 ./deploy/kur-launchd.sh   # change to every 15 min
+./deploy/kur-launchd.sh uninstall    # remove
 ```
 
-İki iş kurar: `com.vigil.patrol` (periyodik devriye, loglar `logs/`) ve `com.vigil.bot` (bot sürekli ayakta, KeepAlive). Cron tercih edersen:
+Installs two jobs: `com.vigil.patrol` (periodic patrol, logs in `logs/`) and `com.vigil.bot` (bot always running, KeepAlive).
+
+### Linux / WSL2 — cron (simplest)
 
 ```
-*/30 * * * *  cd /path/to/vigil && set -a && . secrets.env && set +a && bin/amele run agent.yaml -q "devriye yap"
+*/30 * * * *  cd /path/to/vigil && set -a && . secrets.env && set +a && bin/amele run agent.yaml -q "patrol"
 ```
 
-## Telegram'dan istek
+For the Telegram bot ("check" command), run `python3 bot/telegram_bot.py` as a service — e.g. this systemd unit:
 
-Bota "kontrol et", "/kontrol" veya "devriye" yaz → devriye başlar, bitince rapor gelir. Bot yalnızca `TELEGRAM_CHAT_ID` sahibine yanıt verir.
+```
+[Unit]
+Description=vigil Telegram bot
+After=network.target
 
-## Güvenlik notları
+[Service]
+WorkingDirectory=/path/to/vigil
+EnvironmentFile=/path/to/vigil/secrets.env
+ExecStart=/usr/bin/python3 /path/to/vigil/bot/telegram_bot.py
+Restart=always
 
-- `secrets.env` git'e girmez; RTSP şifreleri cameras.json'a yazılmaz.
-- amele'nin workspace sandbox'ı **kaza önlemedir, güvenlik sınırı değildir** (kendi dokümanı böyle diyor). Asıl sınır, ajanın çalıştığı kullanıcı hesabıdır.
-- **Prompt injection:** kamera görüntüsüne yazı/afiş konulursa model kandırılıp garip mesajlar atabilir. Bizim araçlar yalnızca "kare çek + analiz + Telegram'a mesaj" olduğu için hasar senaryosu sınırlıdır; yine de ajanı root olarak çalıştırma.
-- amele yeni (v0.1.0, tek geliştirici) — bu sistem alarm değil, haberci. Kritik güvenlik kararlarını buna bağlama.
+[Install]
+WantedBy=multi-user.target
+```
 
-## Bilinen sınırlar / geliştirme fikirleri
+### Windows — Task Scheduler (WSL2)
 
-- amele döngüsünde görüntü desteği yok → vision işi araç içinde (bilinçli tasarım).
-- Ollama'nın OpenAI-uyumlu `/v1` ucunda tool-calling: qwen3-vl ile çalışması beklenir; takılırsa Ollama'yı güncelle veya `patrol.py --all` yedek modunu kullan.
-- İstenirse: hareket algılayan ONVIF olaylarıyla tetikleme, kamera başına özel not, rapora hava durumu ekleme, birden fazla chat_id.
+Create a task (trigger: repeat every 30 minutes) that runs:
+
+```
+wsl -d Ubuntu -- bash -lc 'cd /path/to/vigil && set -a && . secrets.env && set +a && bin/amele run agent.yaml -q "patrol"'
+```
+
+(A cron line inside WSL works only while WSL is running; Task Scheduler is more reliable on Windows.)
+
+## Telegram usage
+
+Send the bot "check", "/check" or "patrol" → it runs a patrol and the report arrives when done. (Turkish triggers "kontrol et" / "devriye" still work.) The bot only responds to the owner's `TELEGRAM_CHAT_ID`.
+
+## Security notes
+
+- `secrets.env` and `cameras.json` never enter git — even though this repo is public, your home network layout and credentials stay private.
+- amele's workspace sandbox is **accident prevention, not a security boundary** (per its own docs). The real boundary is the user account the agent runs under.
+- **Prompt injection:** text/posters in a camera view could trick the model into odd messages. Our tools can only "capture + analyze + message Telegram", so the blast radius is limited — still, don't run the agent as root.
+- amele is young (v0.1.0, single developer) — treat vigil as a messenger, not an alarm system. Don't base critical security decisions on it.
+
+## Known limitations / ideas
+
+- amele's loop has no image support → vision work lives in the tool (deliberate design).
+- Ollama's OpenAI-compatible `/v1` endpoint tool-calling is expected to work with qwen3-vl; if it gets stuck, update Ollama or use `patrol.py --all` fallback.
+- Ideas: ONVIF motion events as triggers, per-camera notes, weather in the report, multiple chat IDs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
