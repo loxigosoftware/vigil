@@ -249,6 +249,7 @@ def _rtsp_capture(url, out, timeout=15):
         es = bytearray()
         params_seen = False
         idr_seen = False
+        fu_hdr = None   # H.265 FU header format: 1 (H.264-style) or 2 (RFC 7798)
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -301,13 +302,28 @@ def _rtsp_capture(url, out, timeout=15):
                     continue
                 nal_type = (rtp[0] >> 1) & 0x3F
                 if nal_type == 49:  # FU
-                    fu_type = (rtp[2] >> 1) & 0x3F
-                    start, end = rtp[3] & 0x80, rtp[3] & 0x40
+                    # some cameras (Tapo) send H.265 FU packets with an
+                    # H.264-style 1-byte FU header instead of the RFC 7798
+                    # 2-byte one — detect which format this stream uses
+                    if fu_hdr is None:
+                        t1 = rtp[2] & 0x1F
+                        t2 = (rtp[2] >> 1) & 0x3F
+                        v1 = t1 in (19, 20, 32, 33, 34)
+                        v2 = t2 in (19, 20, 32, 33, 34)
+                        fu_hdr = 2 if (v2 and not v1) else 1
+                    if fu_hdr == 1:  # 1-byte FU header (H.264 style)
+                        fu_type = rtp[2] & 0x1F
+                        start, end = rtp[2] & 0x80, rtp[2] & 0x40
+                        payload = rtp[3:]
+                    else:  # 2-byte FU header (RFC 7798)
+                        fu_type = (rtp[2] >> 1) & 0x3F
+                        start, end = rtp[3] & 0x80, rtp[3] & 0x40
+                        payload = rtp[4:]
                     if start:
                         nalu = bytes([(rtp[0] & 0x81) | (fu_type << 1), rtp[1]])
-                        es += b"\x00\x00\x00\x01" + nalu + rtp[4:]
+                        es += b"\x00\x00\x00\x01" + nalu + payload
                     else:
-                        es += rtp[4:]
+                        es += payload
                     if fu_type in (32, 33, 34):
                         params_seen = True
                     if fu_type in (19, 20):
