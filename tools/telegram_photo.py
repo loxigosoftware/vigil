@@ -102,6 +102,15 @@ if __name__ == "__main__":
     caption = text
     if lines:
         cam_name = lines[0].strip()
+        # Tolerance: the agent sometimes pastes the whole camera_status output
+        # ("[Main Entry New] clear") instead of just the camera name. Extract
+        # the name from the brackets and treat the remainder as the status.
+        m = re.match(r"^\[([^\]]+)\]\s*(.*)$", cam_name)
+        if m:
+            cam_name = m.group(1).strip()
+            rest = m.group(2).strip()
+            if rest and len(lines) == 1:
+                lines.append(rest)
         cand = ROOT / "snapshots" / f"{cam_name.replace('/', '_')}.jpg"
         if not cand.exists():
             # never fall back to another camera's (possibly stale) frame
@@ -112,6 +121,8 @@ if __name__ == "__main__":
         if status:
             # guard: never let a literal "camera name:" template slip through
             status = re.sub(r"^camera\s+name\s*:\s*", "", status, flags=re.I).strip()
+            # the agent may paste the bracketed output as the caption line too
+            status = re.sub(r"^\[[^\]]+\]\s*", "", status).strip()
             caption = f"{cam_name}: {status}"
         else:
             caption = cam_name

@@ -51,7 +51,7 @@ def main():
             issues.append(name)
             continue
         try:
-            txt = analyze(out, model, host)
+            txt = analyze(out, model)
         except Exception as e:  # noqa: BLE001
             lines.append(f"• {name}: ⚠️ analysis error ({e})")
             issues.append(name)
@@ -72,10 +72,9 @@ def main():
     print(telegram_send.send(report))
 
     for name, txt in photos:
-        (SNAP_DIR / "last.jpg").write_bytes(
-            (SNAP_DIR / f"{name.replace('/', '_')}.jpg").read_bytes()
-        )
-        print(telegram_photo.send_photo(f"{name}: {txt}"))
+        photo = SNAP_DIR / f"{name.replace('/', '_')}.jpg"
+        (SNAP_DIR / "last.jpg").write_bytes(photo.read_bytes())
+        print(telegram_photo.send_photo(f"{name}: {txt}", photo))
 
 
 if __name__ == "__main__":
